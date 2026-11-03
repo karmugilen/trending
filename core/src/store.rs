@@ -85,26 +85,6 @@ pub fn get_history(id: &str) -> Vec<crate::signals::MetricSample> {
     guard.get(id).cloned().unwrap_or_default()
 }
 
-pub fn is_new_and_trending(story: &Story, now: i64) -> bool {
-    let repo = crate::canonical_repo(&story.url, &story.title);
-    let (owner, name) = match repo {
-        Some(r) => r,
-        None => return false,
-    };
-    let guard = store();
-    let is_in_off = guard.iter().any(|(k, snap)| {
-        k.starts_with("ui:gh:off:") && snap.stories.iter().any(|s| {
-            crate::canonical_repo(&s.url, &s.title).as_ref() == Some(&(owner.clone(), name.clone()))
-        })
-    });
-    let is_in_new = guard.iter().any(|(k, snap)| {
-        k.starts_with("ui:gh:") && !k.starts_with("ui:gh:off:") && snap.stories.iter().any(|s| {
-            crate::canonical_repo(&s.url, &s.title).as_ref() == Some(&(owner.clone(), name.clone()))
-        })
-    });
-    (is_in_off && is_in_new) || (is_in_off && story.t > 0 && (now - story.t) <= 7 * 86_400)
-}
-
 pub fn export_history() -> String {
     let guard = HISTORY.lock().unwrap_or_else(|p| p.into_inner());
     serde_json::to_string(&*guard).unwrap_or_else(|_| "{}".to_string())

@@ -473,6 +473,16 @@ pub fn read_pre(
     out
 }
 
+pub fn is_new_and_trending(story: &crate::Story, sig: &Signals, now: i64) -> bool {
+    if story.id.starts_with("gh:trending:") {
+        story.t > 0 && (now - story.t) <= 7 * 86_400
+    } else if story.url.contains("github.com/") {
+        sig.heat >= 25.0 || (sig.flags & FLAG_BREAKOUT != 0)
+    } else {
+        false
+    }
+}
+
 pub fn contains_phrase(norm: &str, term: &str) -> bool {
     // Terms are already lowercase words split by single spaces.
     let bytes = norm.as_bytes();
