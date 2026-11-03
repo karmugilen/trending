@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trending — Real-time Hacker News & GitHub Velocity Tracker</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-theme="dark">
+
+  <!-- Main Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <a href="#" class="brand" id="brand-home">
+        <div class="brand-icon">⚡</div>
+        <div>
+          <span class="brand-title">Trending</span>
+          <span class="brand-badge">1.4.0</span>
+        </div>
+      </a>
+
+      <!-- Source & Mode Controls -->
+      <div class="nav-controls">
+        <!-- Source (HN / GH) -->
+        <div class="segmented-group" id="source-group">
+          <button class="segmented-btn active" data-source="hn" title="Hacker News (Algolia API)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 4h4l4 7 4-7h4L14 14v6h-4v-6L4 4z"/></svg>
+            Hacker News
+          </button>
+          <button class="segmented-btn" data-source="gh" title="GitHub Trending Repos">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+            GitHub
+          </button>
+        </div>
+
+        <!-- Mode (Hot / New / Rising) -->
+        <div class="segmented-group" id="mode-group">
+          <button class="segmented-btn active" data-mode="hot">🔥 Hot</button>
+          <button class="segmented-btn" data-mode="new">⏱️ New</button>
+          <button class="segmented-btn" data-mode="rising" title="Points or stars per hour of life">🚀 Rising</button>
+        </div>
+      </div>
+
+      <!-- Header Action Buttons -->
+      <div class="header-actions">
+        <button class="icon-btn" id="btn-alerts" title="Live Velocity &amp; Security Alerts">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="badge-count" id="alerts-badge" style="display: none;">0</span>
+        </button>
+        <button class="icon-btn" id="btn-saved" title="Saved stories">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+          <span class="badge-dot" id="saved-badge" style="display: none;"></span>
+        </button>
+        <button class="icon-btn" id="btn-shortcuts" title="Keyboard Shortcuts (?)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-theme" title="Toggle Light/Dark/OLED mode">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-settings" title="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="app-main">
+    
+    <!-- Secondary Toolbar -->
+    <div class="toolbar-row">
+      <div class="toolbar-left">
+        <!-- Window Hours -->
+        <select class="hours-select" id="select-hours" title="Window duration">
+          <option value="1">1 hour</option>
+          <option value="6" selected>6 hours</option>
+          <option value="12">12 hours</option>
+          <option value="24">24 hours</option>
+          <option value="48">48 hours</option>
+          <option value="168">7 days</option>
+        </select>
+
+        <button class="icon-btn" id="btn-refresh" title="Refresh feed (r)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
+
+        <div id="bar-filter-indicator" style="display: none;">
+          <span class="active-bar-pill" id="bar-filter-badge">
+            Slot: <span id="bar-filter-name"></span>
+            <span style="font-weight: 700; cursor: pointer;">&times;</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="toolbar-right">
+        <!-- Search Box -->
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" class="search-input" id="search-input" placeholder="Search (press / to focus)...">
+          <button class="search-clear" id="search-clear">&times;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activity Distribution Histogram -->
+    <section class="chart-card" id="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">
+          <span>Activity Histogram</span>
+          <span class="kbd-hint">Click bar to filter</span>
+        </div>
+        <div class="chart-legend">
+          <div class="legend-item">
+            <span class="legend-color" style="background-color: var(--primary);"></span>
+            <span id="legend-score-label">Points</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-color" style="background-color: var(--accent-green);"></span>
+            <span>New items</span>
+          </div>
+        </div>
+      </div>
+      <div class="chart-canvas-container" id="chart-container">
+        <!-- Bars dynamically generated by JS -->
+      </div>
+    </section>
+
+    <!-- Filter Chips Strip -->
+    <section class="chips-section">
+      <!-- Quick Signal Filters -->
+      <div class="chips-row" id="quick-filters-row">
+        <button class="chip active" data-filter="">All</button>
+        <button class="chip" data-filter="security">🛡️ Security <span class="count" id="count-security">0</span></button>
+        <button class="chip" data-filter="interest">⭐ Interests <span class="count" id="count-interest">0</span></button>
+        <button class="chip" data-filter="rising">⚡ Rising <span class="count" id="count-rising">0</span></button>
+      </div>
+
+      <!-- Trending Topics Strip -->
+      <div class="chips-row" id="topics-row">
+        <!-- Generated by JS -->
+      </div>
+
+      <!-- GitHub Languages Strip (shown when source=gh) -->
+      <div class="chips-row" id="langs-row" style="display: none;">
+        <!-- Generated by JS -->
+      </div>
+    </section>
+
+    <!-- Feed List Section -->
+    <section class="feed-container">
+      <div class="feed-header-info">
+        <span id="feed-meta-summary">Loading stories...</span>
+        <span id="feed-fetched-time"></span>
+      </div>
+
+      <!-- List Container -->
+      <div id="stories-list">
+        <div class="loading-box">
+          <div class="spinner"></div>
+          <div>Fetching trending stream...</div>
+        </div>
+      </div>
+
+      <!-- Pagination / Show More -->
+      <div class="pagination-container" id="pagination-container" style="display: none;">
+        <button class="show-more-btn" id="btn-show-more">
+          <span id="show-more-text">Show More Stories</span>
+          <div class="spinner-sm" id="show-more-spinner" style="display: none;"></div>
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- App Footer with Rate Limit Status -->
+  <footer class="app-footer">
+    <div class="footer-container">
+      <div class="footer-status-pill" id="footer-status-box" title="Click to refresh GitHub API Rate Limit status">
+        <span class="status-indicator-dot" id="footer-status-dot"></span>
+        <span class="status-text">GitHub API: <span id="footer-rate-limit">Checking...</span></span>
+      </div>
+      <div class="footer-shortcuts-hint" id="footer-shortcuts-trigger" title="Open keyboard cheatsheet">
+        Press <kbd>?</kbd> for Keyboard Cheatsheet
+      </div>
+    </div>
+  </footer>
+
+  <!-- Discussions Modal -->
+  <div class="modal-overlay" id="discuss-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title" id="discuss-title">Discussion</div>
+        <button class="modal-close" id="discuss-close">&times;</button>
+      </div>
+      <div class="modal-body" id="discuss-body">
+        <div class="loading-box">
+          <div class="spinner"></div>
+          <div>Loading comments thread...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saved Stories Modal -->
+  <div class="modal-overlay" id="saved-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Saved Stories (<span id="saved-count">0</span>)</div>
+        <div class="modal-header-actions">
+          <button class="action-pill" id="btn-export-saved" title="Export saved stories as JSON file">📥 Export JSON</button>
+          <button class="action-pill" id="btn-import-saved" title="Import saved stories from JSON file">📤 Import JSON</button>
+          <input type="file" id="saved-import-file" accept=".json,application/json" style="display: none;">
+          <button class="modal-close" id="saved-close">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body" id="saved-body">
+        <!-- Saved items rendered here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Settings</div>
+        <button class="modal-close" id="settings-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Palette Option -->
+        <div class="setting-group">
+          <div class="setting-label">Accent Color Theme</div>
+          <div class="setting-desc">Inspired by OmaLauncher Material 3 color seeds</div>
+          <div class="palette-picker" id="palette-picker">
+            <div class="palette-dot selected" data-idx="0" style="background-color: #E68E0D;" title="Amber"></div>
+            <div class="palette-dot" data-idx="1" style="background-color: #1E88E5;" title="Blue"></div>
+            <div class="palette-dot" data-idx="2" style="background-color: #00897B;" title="Teal"></div>
+            <div class="palette-dot" data-idx="3" style="background-color: #43A047;" title="Green"></div>
+            <div class="palette-dot" data-idx="4" style="background-color: #8E24AA;" title="Purple"></div>
+            <div class="palette-dot" data-idx="5" style="background-color: #D81B60;" title="Pink"></div>
+            <div class="palette-dot" data-idx="6" style="background-color: #E53935;" title="Red"></div>
+            <div class="palette-dot" data-idx="7" style="background-color: #3949AB;" title="Indigo"></div>
+          </div>
+        </div>
+
+        <!-- Theme Mode -->
+        <div class="setting-group">
+          <div class="setting-label">Appearance</div>
+          <select class="hours-select" id="settings-theme-mode">
+            <option value="dark">Dark Theme (Default)</option>
+            <option value="black">OLED True Black</option>
+            <option value="light">Light Theme</option>
+          </select>
+        </div>
+
+        <!-- Interest Keywords -->
+        <div class="setting-group">
+          <div class="setting-label">Interest Keywords</div>
+          <div class="setting-desc">Comma-separated topics you want highlighted with star badges</div>
+          <input type="text" class="search-input" id="settings-interests" style="width: 100%; border-radius: var(--radius-md);" placeholder="AI, Rust, LLM, Linux, Security">
+        </div>
+
+        <!-- Spam Filter -->
+        <div class="setting-group">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="settings-hide-spam" checked>
+            <span class="setting-label">Hide spam and malware repositories</span>
+          </label>
+        </div>
+
+        <!-- Sensitivity -->
+        <div class="setting-group">
+          <div class="setting-label">
+            <span>Rising Sensitivity</span>
+            <span id="sensitivity-label">Normal</span>
+          </div>
+          <input type="range" id="settings-sensitivity" min="0" max="2" value="1" style="width: 100%;">
+        </div>
+
+        <!-- GitHub Token -->
+        <div class="setting-group">
+          <div class="setting-label">GitHub Personal Access Token (Optional)</div>
+          <div class="setting-desc">Raises GitHub Search API rate limit from 10 to 30 requests/min and prevents rate-limiting</div>
+          <input type="password" class="search-input" id="settings-github-token" style="width: 100%; border-radius: var(--radius-md);" placeholder="ghp_xxxxxxxxxxxx">
+        </div>
+
+        <!-- GitHub API Rate Limit Status Widget in Settings -->
+        <div class="setting-group rate-limit-setting-group">
+          <div class="setting-label">
+            <span>GitHub API Rate Limit Status</span>
+            <button class="action-pill text-xs" id="btn-refresh-status" type="button" title="Refresh API status">↻ Check Status</button>
+          </div>
+          <div class="rate-status-card" id="rate-status-card">
+            <div class="rate-status-item">
+              <span class="rate-label">Search API:</span>
+              <span class="rate-val" id="settings-rate-search">-- / --</span>
+            </div>
+            <div class="rate-status-item">
+              <span class="rate-label">Core API:</span>
+              <span class="rate-val" id="settings-rate-core">-- / --</span>
+            </div>
+            <div class="rate-status-item">
+              <span class="rate-label">Resets In:</span>
+              <span class="rate-val" id="settings-rate-reset">--</span>
+            </div>
+            <div class="rate-status-item">
+              <span class="rate-label">Auth Level:</span>
+              <span class="rate-val" id="settings-rate-auth">--</span>
+            </div>
+          </div>
+        </div>
+
+        <button class="segmented-btn active" id="btn-save-settings" style="margin-top: 10px; width: 100%; justify-content: center; padding: 10px;">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Alerts Modal -->
+  <div class="modal-overlay" id="alerts-modal">
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">⚡ Live Alerts &amp; Velocity Spikes (<span id="alerts-modal-count">0</span>)</div>
+        <button class="modal-close" id="alerts-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="alerts-notification-banner" id="notif-banner">
+          <div class="notif-banner-text">
+            <span class="notif-banner-title">🔔 Desktop Notifications</span>
+            <span class="notif-banner-sub" id="notif-banner-sub">Get real-time browser alerts when stories spike or match critical CVEs</span>
+          </div>
+          <button class="action-pill active" id="btn-request-notif">Enable Notifications</button>
+        </div>
+
+        <!-- Alert Category Filter Chips -->
+        <div class="chips-row" id="alerts-filter-row">
+          <button class="chip active" data-alert-filter="all">All Alerts <span class="count" id="count-alert-all">0</span></button>
+          <button class="chip" data-alert-filter="breaking">🔥 Breaking Heat (&ge;30/h) <span class="count" id="count-alert-breaking">0</span></button>
+          <button class="chip" data-alert-filter="security">🛡️ Security &amp; CVEs <span class="count" id="count-alert-security">0</span></button>
+          <button class="chip" data-alert-filter="interest">⭐ Interest Matches <span class="count" id="count-alert-interest">0</span></button>
+        </div>
+
+        <div class="alerts-list" id="alerts-list">
+          <!-- Dynamic alerts rendered here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcuts Modal -->
+  <div class="modal-overlay" id="shortcuts-modal">
+    <div class="modal-content modal-md">
+      <div class="modal-header">
+        <div class="modal-title">⌨️ Keyboard Shortcuts</div>
+        <button class="modal-close" id="shortcuts-close">&times;</button>
+      </div>
+      <div class="modal-body shortcuts-body">
+        <div class="shortcuts-section">
+          <div class="shortcuts-subtitle">Feed Navigation &amp; Selection</div>
+          <div class="shortcut-row"><kbd>j</kbd> <span>Move selection down to next story</span></div>
+          <div class="shortcut-row"><kbd>k</kbd> <span>Move selection up to previous story</span></div>
+          <div class="shortcut-row"><kbd>Enter</kbd> or <kbd>o</kbd> <span>Open selected story in new browser tab</span></div>
+        </div>
+        <div class="shortcuts-section">
+          <div class="shortcuts-subtitle">Story Actions</div>
+          <div class="shortcut-row"><kbd>s</kbd> <span>Toggle bookmark / save selected story</span></div>
+          <div class="shortcut-row"><kbd>d</kbd> <span>Open discussion and comments thread</span></div>
+          <div class="shortcut-row"><kbd>m</kbd> <span>Toggle read / unread status</span></div>
+          <div class="shortcut-row"><kbd>c</kbd> <span>Copy story URL to clipboard</span></div>
+        </div>
+        <div class="shortcuts-section">
+          <div class="shortcuts-subtitle">Global Controls</div>
+          <div class="shortcut-row"><kbd>/</kbd> <span>Focus search input</span></div>
+          <div class="shortcut-row"><kbd>r</kbd> <span>Refresh trending feed</span></div>
+          <div class="shortcut-row"><kbd>?</kbd> <span>Show / hide this cheatsheet</span></div>
+          <div class="shortcut-row"><kbd>Esc</kbd> <span>Close any open modal or unfocus search</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Non-blocking Toast Feedback -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

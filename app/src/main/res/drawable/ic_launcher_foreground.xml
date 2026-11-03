@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer radar range arc (origin at 34, 74) -->
+    <path
+        android:pathData="M34,30 A44,44 0 0,1 78,74"
+        android:strokeWidth="1.75"
+        android:strokeColor="#33FFB300"
+        android:strokeLineCap="round" />
+
+    <!-- Inner radar range arc -->
+    <path
+        android:pathData="M34,48 A26,26 0 0,1 60,74"
+        android:strokeWidth="1.75"
+        android:strokeColor="#4DFFB300"
+        android:strokeLineCap="round" />
+
+    <!-- Radar baseline axis -->
+    <path
+        android:pathData="M30,74 H78"
+        android:strokeWidth="1.5"
+        android:strokeColor="#26FFFFFF"
+        android:strokeLineCap="round" />
+
+    <!-- Trend line glow / shadow -->
+    <path
+        android:pathData="M32,70 C42,70 46,58 56,48 C64,40 68,34 76,28 M65,28 H76 V39"
+        android:strokeWidth="8"
+        android:strokeColor="#40FF3D00"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Sharp breakout trend line -->
+    <path
+        android:pathData="M32,70 C42,70 46,58 56,48 C64,40 68,34 76,28"
+        android:strokeWidth="4"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="32"
+                android:startY="70"
+                android:endX="76"
+                android:endY="28"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFF5722" />
+                <item android:offset="0.55" android:color="#FFFFA000" />
+                <item android:offset="1.0" android:color="#FFFFE082" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Arrowhead -->
+    <path
+        android:pathData="M65,28 H76 V39"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="65"
+                android:startY="39"
+                android:endX="76"
+                android:endY="28"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFA000" />
+                <item android:offset="1.0" android:color="#FFFFE082" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Criticality pulse beacon ring at inflection point (56, 48) -->
+    <path
+        android:pathData="M56,42 A6,6 0 1,1 55.99,42 Z"
+        android:strokeWidth="1.5"
+        android:strokeColor="#80FF5722" />
+
+    <!-- Pulse beacon core dot -->
+    <path
+        android:pathData="M56,45.5 A2.5,2.5 0 1,1 55.99,45.5 Z"
+        android:fillColor="#FFFFE082" />
+</vector>

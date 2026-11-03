@@ -1,0 +1,32 @@
+# Built application files
+*.apk
+*.ap_
+*.aab
+
+# Android & Gradle
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+.cxx/
+.externalNativeBuild/
+captures/
+output-metadata.json
+
+# Rust artifacts
+core/target/
+
+# Python & Web
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+web/data/saved.json
+web/data/settings.json
+
+# OS files
+.DS_Store
+Thumbs.db
+*~

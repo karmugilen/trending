@@ -1,0 +1,24 @@
+Trending 1.4.0
+Package: app.omalauncher.trending
+versionCode 5, versionName 1.4.0, arm64-v8a
+Installable APK in this folder: Trending-1.4.0.apk
+Signed with v2 using debug.keystore (also in this folder), so it updates older versions in place.
+Store password: android
+Key alias: androiddebugkey
+Key password: android
+
+The feed logic is Rust in core/: parsing, the per-slot row cache, charts, ranking,
+rising/security/spam/interest signals, alert decisions, and the API URLs.
+HTTP, screens, notifications and the background worker are Kotlin.
+`cargo test` in core/ (or ./gradlew :app:testTrendingRust) runs the Rust tests.
+
+Rebuild needs JDK 17+, Android SDK, Android NDK, and Rust with the aarch64-linux-android target.
+1. local.properties: sdk.dir points at your SDK.
+2. The build finds cargo ($CARGO, ~/.cargo/bin, /root/.cargo/bin, or PATH) and the newest NDK
+   under the SDK (or $ANDROID_NDK_HOME) by itself.
+   On an x86-64 PC it links with the NDK clang. On an aarch64 machine (the phone), where the
+   NDK's x86-64 clang cannot run, it uses core/android-link.sh with the host clang instead.
+3. On the phone, if aapt2 from Maven does not run, put this in ~/.gradle/gradle.properties:
+   android.aapt2FromMavenOverride=/root/Android/Sdk/build-tools/37.0.0/aapt2
+4. ./gradlew :app:assembleRelease
+   The release APK is app/build/outputs/apk/release/app-release.apk

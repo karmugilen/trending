@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Radar arc -->
+    <path
+        android:pathData="M34,30 A44,44 0 0,1 78,74"
+        android:strokeWidth="1.75"
+        android:strokeColor="#66FFFFFF"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M34,48 A26,26 0 0,1 60,74"
+        android:strokeWidth="1.75"
+        android:strokeColor="#88FFFFFF"
+        android:strokeLineCap="round" />
+
+    <!-- Radar baseline -->
+    <path
+        android:pathData="M30,74 H78"
+        android:strokeWidth="1.5"
+        android:strokeColor="#44FFFFFF"
+        android:strokeLineCap="round" />
+
+    <!-- Breakout trend line -->
+    <path
+        android:pathData="M32,70 C42,70 46,58 56,48 C64,40 68,34 76,28"
+        android:strokeWidth="4"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round" />
+
+    <!-- Arrowhead -->
+    <path
+        android:pathData="M65,28 H76 V39"
+        android:strokeWidth="4"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Beacon ring & core -->
+    <path
+        android:pathData="M56,42 A6,6 0 1,1 55.99,42 Z"
+        android:strokeWidth="1.5"
+        android:strokeColor="#AAFFFFFF" />
+
+    <path
+        android:pathData="M56,45.5 A2.5,2.5 0 1,1 55.99,45.5 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>
