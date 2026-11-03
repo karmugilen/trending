@@ -11,13 +11,13 @@ val localProps = Properties().apply {
 
 android {
     namespace = "app.omalauncher.trending"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.omalauncher.trending"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 7
+        targetSdk = 36
+        versionCode = 8
         versionName = "1.5.1"
     }
 
@@ -37,13 +37,26 @@ android {
         }
     }
 
-    // The keystore shipped with the source, so a rebuilt APK updates the installed one.
+    // The keystore shipped with the source, or production release key if configured
+    val releaseStore = System.getenv("TRENDING_KEYSTORE") ?: project.findProperty("trendingKeystore") as String?
+    val releaseStorePass = System.getenv("TRENDING_STORE_PASSWORD") ?: project.findProperty("trendingStorePass") as String?
+    val releaseKeyAlias = System.getenv("TRENDING_KEY_ALIAS") ?: project.findProperty("trendingKeyAlias") as String?
+    val releaseKeyPass = System.getenv("TRENDING_KEY_PASSWORD") ?: project.findProperty("trendingKeyPass") as String?
+
     signingConfigs {
         create("shipped") {
             storeFile = rootProject.file("debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+        }
+        if (releaseStore != null && file(releaseStore).exists()) {
+            create("release") {
+                storeFile = file(releaseStore)
+                storePassword = releaseStorePass ?: "android"
+                keyAlias = releaseKeyAlias ?: "trending"
+                keyPassword = releaseKeyPass ?: "android"
+            }
         }
     }
 
@@ -55,7 +68,11 @@ android {
                 getDefaultProguardFile("proguard-android.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.getByName("shipped")
+            signingConfig = if (signingConfigs.findByName("release") != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("shipped")
+            }
         }
         debug {
             isMinifyEnabled = false

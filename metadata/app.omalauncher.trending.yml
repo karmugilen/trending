@@ -1,0 +1,35 @@
+Categories:
+  - Development
+  - News
+License: Apache-2.0
+AuthorName: Karmugil
+WebSite: https://github.com/karmugilen/trending
+SourceCode: https://github.com/karmugilen/trending
+IssueTracker: https://github.com/karmugilen/trending/issues
+
+AutoName: Trending
+
+RepoType: git
+Repo: https://github.com/karmugilen/trending.git
+
+Builds:
+  - versionName: 1.5.1
+    versionCode: 8
+    commit: v1.5.1
+    sudo:
+      - apt-get update
+      - apt-get install -y gcc libc6-dev rustup
+    gradle:
+      - yes
+    gradleprops:
+      - allAbis
+    build:
+      - rustup default stable
+      - rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+    output: app/build/outputs/apk/release/app-universal-release-unsigned.apk
+    ndk: r26b
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[\d.]+$
+CurrentVersion: 1.5.1
+CurrentVersionCode: 8

@@ -1,0 +1,9 @@
+Trending is a lightweight, zero-tracking, privacy-first personal developer radar.
+
+Features:
+• Instant Hacker News & GitHub breakout radar.
+• Velocity metrics and frequency equalizer visualization.
+• Emerging topic detection with lift analysis.
+• Multi-ABI high performance native Rust engine paired with Jetpack Compose.
+• Offline caching and privacy-first local operation (no external account or tracking).
+• Security and vulnerability indicators.
