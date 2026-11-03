@@ -351,7 +351,7 @@ function renderTopics(topics) {
   }
   row.innerHTML = topics.map(t => {
     const active = state.topic === t.word ? "active" : "";
-    return `<button class="chip topic-chip ${active}" data-topic="${escapeHtml(t.word)}">${escapeHtml(t.word)} <span class="count">${t.count}</span></button>`;
+    return `<button class="chip topic-chip ${active}" data-topic="${escapeAttr(t.word)}">${escapeHtml(t.word)} <span class="count">${t.count}</span></button>`;
   }).join("");
 
   row.querySelectorAll(".topic-chip").forEach(btn => {
@@ -372,7 +372,7 @@ function renderLangs(langs) {
   row.style.display = "flex";
   row.innerHTML = langs.map(l => {
     const active = state.lang === l.name ? "active" : "";
-    return `<button class="chip lang-chip ${active}" data-lang="${escapeHtml(l.name)}">${escapeHtml(l.name)} <span class="count">${l.count}</span></button>`;
+    return `<button class="chip lang-chip ${active}" data-lang="${escapeAttr(l.name)}">${escapeHtml(l.name)} <span class="count">${l.count}</span></button>`;
   }).join("");
 
   row.querySelectorAll(".lang-chip").forEach(btn => {
