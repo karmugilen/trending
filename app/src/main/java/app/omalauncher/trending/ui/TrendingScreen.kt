@@ -182,8 +182,10 @@ import app.omalauncher.trending.logic.Lang
 import app.omalauncher.trending.logic.Mode
 import app.omalauncher.trending.logic.Source
 import app.omalauncher.trending.logic.Story
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -788,7 +790,7 @@ private fun ChartCard(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (isGh) "Language Breakdown" else "Velocity Radar",
+                        if (isGh) "Language Breakdown" else "Frequency Waveform",
                         style = MaterialTheme.typography.titleSmall,
                         color = colors.onSurface,
                     )
@@ -797,7 +799,9 @@ private fun ChartCard(
                             val count = feed.langs.size
                             if (count > 0) "$count ${if (count == 1) "language" else "languages"} trending · tap to filter" else "Top languages"
                         } else {
-                            "Fastest-rising stories gaining momentum right now"
+                            val points = TrendingCore.fmtCompact(feed.hotBars.sum())
+                            val count = TrendingCore.fmtCompact(feed.newBars.sum())
+                            "$points points · $count stories in the ${lastPhrase(ui.hours, ui)}"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurfaceVariant,
@@ -831,10 +835,10 @@ private fun ChartCard(
                         )
                     }
                 } else {
-                    VelocityRadar(
+                    FrequencyWaveform(
                         feed = feed,
+                        ui = ui,
                         expanded = expanded,
-                        onOpen = onOpen,
                     )
                 }
             }
@@ -938,212 +942,239 @@ private fun barRange(ui: TrendingUi, index: Int): String = barRange(ui.window, i
 private fun barAt(x: Float, width: Int, n: Int): Int =
     (x / (width.toFloat() / n)).toInt().coerceIn(0, n - 1)
 
+private const val SPECTRUM_BARS = 36
+
+private fun resampleSpectrum(values: List<Double>, count: Int): List<Float> {
+    if (values.isEmpty()) return List(count) { 0f }
+    if (values.size == 1) return List(count) { values[0].toFloat() }
+    val n = values.size
+    return List(count) { k ->
+        val fraction = k / (count - 1).toFloat()
+        val origIdxFloat = fraction * (n - 1)
+        val i0 = origIdxFloat.toInt().coerceIn(0, n - 2)
+        val i1 = (i0 + 1).coerceIn(0, n - 1)
+        val t = origIdxFloat - i0
+        val smoothT = t * t * (3f - 2f * t)
+        val v0 = values[i0].toFloat()
+        val v1 = values[i1].toFloat()
+        v0 + (v1 - v0) * smoothT
+    }
+}
+
 @Composable
-private fun VelocityRadar(
+private fun FrequencyWaveform(
     feed: Feed,
+    ui: TrendingUi,
     expanded: Boolean,
-    onOpen: (String, String) -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    val movers = remember(feed.shown) {
-        val withHeat = feed.shown.filter { it.heat > 0.0 }.sortedByDescending { it.heat }
-        if (withHeat.isNotEmpty()) withHeat.take(8) else feed.shown.take(5)
-    }
-    if (movers.isEmpty()) return
+    val view = LocalView.current
+    val hotValues = feed.hotBars
+    val newValues = feed.newBars
+    val rawN = hotValues.size.coerceAtLeast(1)
+    val rawPeakV = (hotValues.maxOrNull() ?: 0.0).coerceAtLeast(1.0).toFloat()
+    val peakIdx = if (rawPeakV > 1.0f) hotValues.indexOfFirst { it.toFloat() == rawPeakV } else -1
 
-    val maxHeat = (movers.firstOrNull()?.heat ?: 1.0).coerceAtLeast(1.0)
+    var scrubBar by remember(ui.hours) { mutableIntStateOf(-1) }
 
-    if (!expanded) {
-        Row(
+    val spectrum = remember(hotValues) { resampleSpectrum(hotValues, SPECTRUM_BARS) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "waveAnim")
+    val wavePhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(3200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "wavePhase",
+    )
+
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(
             Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            movers.take(4).forEachIndexed { i, story ->
-                val interactionSource = remember { MutableInteractionSource() }
-                val isPressed by interactionSource.collectIsPressedAsState()
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isPressed) colors.surfaceContainerHighest else colors.surfaceContainerHigh,
-                    border = BorderStroke(
-                        1.dp,
-                        if (isPressed) colors.primary.copy(alpha = 0.5f) else colors.outlineVariant.copy(alpha = 0.4f),
-                    ),
-                    modifier = Modifier.clickable(
-                        interactionSource = interactionSource,
-                        indication = ripple(color = colors.primary),
-                        onClick = { onOpen(story.url, story.id) },
-                    ),
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            "#${i + 1}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.primary,
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                AppIcons.TrendingUp,
-                                contentDescription = null,
-                                tint = colors.primary,
-                                modifier = Modifier.size(13.dp),
-                            )
-                            Spacer(Modifier.width(2.dp))
-                            Text(
-                                "+${story.heat.roundToInt()}/h",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.primary,
-                            )
+                .height(if (expanded) 80.dp else 28.dp)
+                .then(
+                    if (expanded) {
+                        Modifier.pointerInput(rawN) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val pointerId = down.id
+                                var isScrubbing = false
+                                val touchSlop = viewConfiguration.touchSlop
+                                var totalDx = 0f
+                                var totalDy = 0f
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+
+                                    if (!change.pressed) {
+                                        if (!isScrubbing && abs(totalDx) < touchSlop && abs(totalDy) < touchSlop) {
+                                            val tapBar = ((down.position.x / size.width) * rawN).toInt().coerceIn(0, rawN - 1)
+                                            view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                                            scrubBar = if (scrubBar == tapBar) -1 else tapBar
+                                        }
+                                        break
+                                    }
+
+                                    val dx = change.position.x - down.position.x
+                                    val dy = change.position.y - down.position.y
+
+                                    if (!isScrubbing) {
+                                        if (change.isConsumed) break
+                                        totalDx = dx
+                                        totalDy = dy
+
+                                        if (abs(totalDy) > touchSlop && abs(totalDy) > abs(totalDx)) {
+                                            break // Vertical scroll priority
+                                        } else if (abs(totalDx) > touchSlop && abs(totalDx) > abs(totalDy)) {
+                                            isScrubbing = true
+                                            change.consume()
+                                            val newBar = ((change.position.x / size.width) * rawN).toInt().coerceIn(0, rawN - 1)
+                                            if (newBar != scrubBar) {
+                                                scrubBar = newBar
+                                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                            }
+                                        }
+                                    } else {
+                                        change.consume()
+                                        val newBar = ((change.position.x / size.width) * rawN).toInt().coerceIn(0, rawN - 1)
+                                        if (newBar != scrubBar) {
+                                            scrubBar = newBar
+                                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                        }
+                                    }
+                                }
+
+                                if (isScrubbing) {
+                                    scrubBar = -1
+                                }
+                            }
                         }
-                        Text(
-                            story.title,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 140.dp),
+                    } else Modifier
+                )
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                if (w <= 0f || h <= 0f) return@Canvas
+
+                val padTop = if (expanded) 10.dp.toPx() else 3.dp.toPx()
+                val padBot = if (expanded) 4.dp.toPx() else 2.dp.toPx()
+                val chartH = h - padTop - padBot
+                val colW = w / SPECTRUM_BARS.toFloat()
+                val barW = (colW * 0.58f).coerceIn(2.5.dp.toPx(), 9.dp.toPx())
+                val cornerR = CornerRadius(barW / 2f, barW / 2f)
+                val dotRadius = (barW / 2.2f).coerceIn(1.5.dp.toPx(), 4.dp.toPx())
+
+                val activeRawBar = scrubBar
+
+                for (k in 0 until SPECTRUM_BARS) {
+                    val origBarIdx = ((k / (SPECTRUM_BARS - 1).toFloat()) * (rawN - 1)).roundToInt().coerceIn(0, rawN - 1)
+                    val isHovered = activeRawBar >= 0 && origBarIdx == activeRawBar
+
+                    val rawV = spectrum.getOrElse(k) { 0f }
+                    val normAmp = (rawV / rawPeakV).coerceIn(0f, 1f)
+
+                    // Organic breathing wave
+                    val waveOffset = (sin(wavePhase + k * 0.35f) * 0.10f * normAmp).toFloat()
+                    val totalAmp = (normAmp + waveOffset).coerceIn(0.06f, 1f)
+                    val barH = (totalAmp * chartH).coerceAtLeast(3.dp.toPx())
+
+                    val cx = k * colW + colW / 2f
+                    val topY = h - padBot - barH
+
+                    val brush = if (isHovered) {
+                        Brush.verticalGradient(
+                            colors = listOf(colors.primary, colors.secondary, colors.primary.copy(alpha = 0.3f)),
+                            startY = topY,
+                            endY = h - padBot,
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                colors.primary.copy(alpha = if (normAmp > 0.05f) 0.95f else 0.40f),
+                                colors.primary.copy(alpha = 0.45f),
+                                colors.primary.copy(alpha = 0.08f),
+                            ),
+                            startY = topY,
+                            endY = h - padBot,
+                        )
+                    }
+
+                    drawRoundRect(
+                        brush = brush,
+                        topLeft = Offset(cx - barW / 2f, topY),
+                        size = Size(barW, barH),
+                        cornerRadius = cornerR,
+                    )
+
+                    if (expanded && normAmp > 0.15f) {
+                        val capCenterY = (topY - 4.dp.toPx()).coerceAtLeast(padTop / 2f)
+                        val capColor = if (isHovered) colors.primary else colors.secondary.copy(alpha = 0.85f)
+                        drawCircle(
+                            color = capColor,
+                            radius = dotRadius,
+                            center = Offset(cx, capCenterY),
+                        )
+                    }
+
+                    if (isHovered && expanded) {
+                        drawLine(
+                            color = colors.primary.copy(alpha = 0.5f),
+                            start = Offset(cx, 0f),
+                            end = Offset(cx, h),
+                            strokeWidth = 1.dp.toPx(),
                         )
                     }
                 }
             }
         }
-    } else {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            movers.forEachIndexed { i, story ->
-                val interactionSource = remember { MutableInteractionSource() }
-                val isPressed by interactionSource.collectIsPressedAsState()
-                val scale by animateFloatAsState(
-                    targetValue = if (isPressed) 0.97f else 1.0f,
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-                    label = "moverCardPress",
-                )
 
-                Surface(
-                    modifier = Modifier
-                        .width(230.dp)
-                        .height(130.dp)
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        }
-                        .clickable(
-                            interactionSource = interactionSource,
-                            indication = ripple(color = colors.primary),
-                            onClick = { onOpen(story.url, story.id) },
-                        ),
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isPressed) colors.surfaceContainerHighest else colors.surfaceContainerHigh,
-                    tonalElevation = if (isPressed) 4.dp else 2.dp,
-                    border = BorderStroke(
-                        1.dp,
-                        if (isPressed) colors.primary.copy(alpha = 0.5f) else colors.outlineVariant.copy(alpha = 0.45f),
-                    ),
-                ) {
-                    Column(
-                        Modifier
-                            .fillMaxSize()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                Text(
-                                    "#${i + 1}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = colors.onSurfaceVariant,
-                                )
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = colors.primaryContainer.copy(alpha = 0.7f),
-                                ) {
-                                    Row(
-                                        Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                    ) {
-                                        Icon(
-                                            AppIcons.TrendingUp,
-                                            contentDescription = null,
-                                            tint = colors.onPrimaryContainer,
-                                            modifier = Modifier.size(13.dp),
-                                        )
-                                        Text(
-                                            "+${story.heat.roundToInt()}/h",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = colors.onPrimaryContainer,
-                                        )
-                                    }
-                                }
-                            }
-                            if (story.domain.isNotEmpty()) {
-                                Text(
-                                    story.domain,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = colors.onSurfaceVariant.copy(alpha = 0.7f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.widthIn(max = 85.dp),
-                                )
-                            }
-                        }
+        if (expanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                val startLabel = TrendingCore.fmtBarLabel(ui.window.origin, 1)
+                val midTime = ui.window.origin + (ui.window.step * (rawN / 2))
+                val midLabel = TrendingCore.fmtBarLabel(midTime, 1)
+                Text(startLabel, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant.copy(alpha = 0.6f))
+                Text(midLabel, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant.copy(alpha = 0.6f))
+                Text("Now", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant.copy(alpha = 0.6f))
+            }
 
-                        Text(
-                            story.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.onSurface,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(vertical = 2.dp),
-                        )
-
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                "${TrendingCore.fmtCompact(story.score)} pts · ${story.extra.toInt()} cmts",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.onSurfaceVariant,
-                            )
-                            val ratio = (story.heat / maxHeat).toFloat().coerceIn(0.08f, 1f)
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(3.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(colors.surfaceContainerHighest),
-                            ) {
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth(ratio)
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(2.dp))
-                                        .background(colors.primary),
-                                )
-                            }
-                        }
-                    }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                if (scrubBar in hotValues.indices) {
+                    val pts = TrendingCore.fmtCompact(hotValues[scrubBar])
+                    val stories = newValues.getOrNull(scrubBar)?.toInt() ?: 0
+                    Text(
+                        text = "${barRange(ui.window, scrubBar)}: $pts pts · $stories ${if (stories == 1) "story" else "stories"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.primary,
+                    )
+                    Text(
+                        text = "Clear",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { scrubBar = -1 },
+                    )
+                } else if (peakIdx in hotValues.indices && hotValues[peakIdx] > 0) {
+                    val peakPts = TrendingCore.fmtCompact(hotValues[peakIdx])
+                    val peakStories = newValues.getOrNull(peakIdx)?.toInt() ?: 0
+                    Text(
+                        text = "Peak: ${barRange(ui.window, peakIdx)} ($peakPts pts, $peakStories ${if (peakStories == 1) "story" else "stories"}) · Touch to scrub",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
                 }
             }
         }
