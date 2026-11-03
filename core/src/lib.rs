@@ -332,10 +332,13 @@ fn assemble(
             let samples = store::get_history(&story.id);
             let sparkline = signals::sparkline_for_samples(&samples, 4);
             let cross = source == Source::Hn && canonical_repo(&story.url, &story.title).is_some();
+            let is_new_trending = source == Source::Gh && store::is_new_and_trending(story, now);
             Shown {
                 story: story.clone(),
                 heat: sig.heat,
-                flags: sig.flags | (if cross { signals::FLAG_CROSS_SOURCE } else { 0 }),
+                flags: sig.flags
+                    | (if cross { signals::FLAG_CROSS_SOURCE } else { 0 })
+                    | (if is_new_trending { signals::FLAG_NEW_AND_TRENDING } else { 0 }),
                 tag: sig.tag,
                 matched: sig.matched,
                 domain,

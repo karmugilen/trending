@@ -342,7 +342,7 @@ private fun RadarStoryCard(
                         color = if (read) colors.tertiaryContainer.copy(alpha = 0.45f) else colors.tertiaryContainer,
                     ) {
                         Text(
-                            "🔀 $badgeText",
+                            badgeText,
                             style = MaterialTheme.typography.labelSmall,
                             color = if (read) colors.onTertiaryContainer.copy(alpha = 0.6f) else colors.onTertiaryContainer,
                             fontWeight = FontWeight.Bold,
@@ -366,7 +366,7 @@ private fun RadarStoryCard(
                                     .background(if (read) colors.onErrorContainer.copy(alpha = 0.4f) else colors.onErrorContainer.copy(alpha = activePulse), CircleShape)
                             )
                             Text(
-                                "🛡️ ${story.tag}",
+                                story.tag,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (read) colors.onErrorContainer.copy(alpha = 0.6f) else colors.onErrorContainer,
                                 fontWeight = FontWeight.Bold,
@@ -423,7 +423,7 @@ private fun RadarStoryCard(
                 )
                 if (story.heat >= 10.0) {
                     Text(
-                        " · 🔥 +${story.heat.toInt()}/hr",
+                        " · +${story.heat.toInt()}/hr",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (read) colors.onSurfaceVariant.copy(alpha = 0.6f) else colors.primary,
                         fontWeight = FontWeight.Medium,
@@ -431,7 +431,7 @@ private fun RadarStoryCard(
                 }
                 if (story.extra > 0) {
                     Text(
-                        " · 💬 ${story.extra.toInt()}",
+                        " · ${story.extra.toInt()} comments",
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.onSurfaceVariant.copy(alpha = if (read) 0.6f else 1f),
                         modifier = Modifier.clickable { onOpenThread(story) },

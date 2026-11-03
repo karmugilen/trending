@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 class TrendingApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        app.omalauncher.trending.data.FeedClient.init(cacheDir)
         Notifier.createChannels(this)
         scope.launch {
             val store = SettingsStore.get(this@TrendingApp)

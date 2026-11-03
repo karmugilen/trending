@@ -793,7 +793,7 @@ private fun ChartCard(
                     val peak = feed.newBars.indices.maxByOrNull { feed.hotBars[it] }
                     if (peak != null && feed.hotBars[peak] > 0) {
                         Text(
-                            "🔥 Peak rush at ${barRange(ui, peak)} (${TrendingCore.fmtCompact(feed.hotBars[peak])} pts)",
+                            "Peak activity at ${barRange(ui, peak)} (${TrendingCore.fmtCompact(feed.hotBars[peak])} pts)",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.primary,
                         )
@@ -1355,21 +1355,24 @@ private fun StoryCard(
                 }
                 val tags = buildList {
                     if (isStackAffected) {
-                        add(StoryTag("⚡ In your stack: ${story.affectsStack.ifEmpty { "dependency" }}", colors.errorContainer, colors.onErrorContainer, isCritical = true))
+                        add(StoryTag("In your stack: ${story.affectsStack.ifEmpty { "dependency" }}", colors.errorContainer, colors.onErrorContainer, isCritical = true))
                     }
                     if (story.crossSource || story.has(Flags.CROSS_SOURCE)) {
-                        add(StoryTag("🔀 HN + GitHub", colors.tertiaryContainer, colors.onTertiaryContainer))
+                        add(StoryTag("HN + GitHub", colors.tertiaryContainer, colors.onTertiaryContainer))
+                    }
+                    if (story.has(Flags.NEW_AND_TRENDING)) {
+                        add(StoryTag("New & Trending", colors.secondaryContainer, colors.onSecondaryContainer))
                     }
                     if (story.has(Flags.BREAKOUT)) {
-                        add(StoryTag("🚀 Breakout", colors.primaryContainer, colors.onPrimaryContainer, isWarning = true))
+                        add(StoryTag("Breakout", colors.primaryContainer, colors.onPrimaryContainer, isWarning = true))
                     }
                     if (isSecurity) {
-                        add(StoryTag("🛡️ ${story.tag.ifEmpty { "Security" }.replaceFirstChar { it.uppercase() }}", colors.errorContainer, colors.onErrorContainer, isCritical = true))
+                        add(StoryTag(story.tag.ifEmpty { "Security" }.replaceFirstChar { it.uppercase() }, colors.errorContainer, colors.onErrorContainer, isCritical = true))
                     }
                     if (story.has(Flags.RISING)) {
                         add(StoryTag("Rising fast", colors.primaryContainer, colors.onPrimaryContainer, isWarning = story.heat >= 40.0))
                     }
-                    if (story.has(Flags.INTEREST)) add(StoryTag("★ ${story.matched}", colors.tertiaryContainer, colors.onTertiaryContainer))
+                    if (story.has(Flags.INTEREST)) add(StoryTag(story.matched, colors.tertiaryContainer, colors.onTertiaryContainer))
                     if (story.has(Flags.SPAM)) add(StoryTag("Likely spam", colors.surfaceVariant, colors.onSurfaceVariant))
                 }
                 if (tags.isNotEmpty() && !read) {

@@ -12,6 +12,7 @@ pub const FLAG_ACCELERATING: u32 = 16;
 pub const FLAG_BREAKOUT: u32 = 32;
 pub const FLAG_STACK_AFFECTED: u32 = 64;
 pub const FLAG_CROSS_SOURCE: u32 = 128;
+pub const FLAG_NEW_AND_TRENDING: u32 = 256;
 
 /// Lowercase, keep letters and digits, collapse everything else into single
 /// spaces, and pad both ends so a phrase can be found with `contains(" x y ")`.
@@ -364,7 +365,7 @@ pub fn parse_stack_dependencies(raw: &str) -> Vec<String> {
                     if let Some(deps) = obj.get(*dep_key).and_then(|v| v.as_object()) {
                         for (k, _) in deps {
                             let k = k.trim().to_lowercase();
-                            let clean = k.split('/').last().unwrap_or(&k).to_string();
+                            let clean = k.split('/').next_back().unwrap_or(&k).to_string();
                             if clean.len() >= 2 && !out.contains(&clean) {
                                 out.push(clean);
                             }
@@ -398,7 +399,7 @@ pub fn parse_stack_dependencies(raw: &str) -> Vec<String> {
         if line.starts_with("require ") || line.starts_with("replace ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2 {
-                let pkg = parts[1].split('/').last().unwrap_or(parts[1]).to_lowercase();
+                let pkg = parts[1].split('/').next_back().unwrap_or(parts[1]).to_lowercase();
                 if pkg.len() >= 2 && !out.contains(&pkg) {
                     out.push(pkg);
                 }
@@ -410,7 +411,7 @@ pub fn parse_stack_dependencies(raw: &str) -> Vec<String> {
         for sub in line.split(',') {
             let sub = sub.trim();
             let pkg = sub
-                .split(|c| matches!(c, '=' | '>' | '<' | '~' | '!' | ';' | '@' | '['))
+                .split(['=', '>', '<', '~', '!', ';', '@', '['])
                 .next()
                 .unwrap_or("")
                 .trim()

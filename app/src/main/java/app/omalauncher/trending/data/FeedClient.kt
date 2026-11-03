@@ -5,10 +5,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Cache
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -87,16 +89,38 @@ class FeedClient private constructor(private val http: OkHttpClient) {
         private const val USER_AGENT = "omalauncher-trending/1.2"
         private const val RETRIES = 2
         private val BACKOFF_MS = longArrayOf(800, 2500)
+        private const val CACHE_SIZE = 15L * 1024 * 1024
 
-        val shared: FeedClient by lazy {
-            FeedClient(
-                OkHttpClient.Builder()
-                    .connectTimeout(12, TimeUnit.SECONDS)
-                    .readTimeout(20, TimeUnit.SECONDS)
-                    .callTimeout(30, TimeUnit.SECONDS)
-                    .retryOnConnectionFailure(true)
-                    .build(),
-            )
+        @Volatile
+        private var instance: FeedClient? = null
+
+        fun init(cacheDir: File) {
+            if (instance == null) {
+                synchronized(this) {
+                    if (instance == null) {
+                        instance = buildClient(cacheDir)
+                    }
+                }
+            }
+        }
+
+        val shared: FeedClient
+            get() = instance ?: synchronized(this) {
+                instance ?: buildClient(null).also { instance = it }
+            }
+
+        private fun buildClient(cacheDir: File?): FeedClient {
+            val builder = OkHttpClient.Builder()
+                .connectTimeout(12, TimeUnit.SECONDS)
+                .readTimeout(20, TimeUnit.SECONDS)
+                .callTimeout(30, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+            if (cacheDir != null) {
+                try {
+                    builder.cache(Cache(File(cacheDir, "http_cache"), CACHE_SIZE))
+                } catch (_: Exception) {}
+            }
+            return FeedClient(builder.build())
         }
     }
 }

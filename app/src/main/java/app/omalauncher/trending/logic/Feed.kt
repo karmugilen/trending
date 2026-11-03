@@ -30,6 +30,7 @@ object Flags {
     const val BREAKOUT = 32
     const val STACK_AFFECTED = 64
     const val CROSS_SOURCE = 128
+    const val NEW_AND_TRENDING = 256
 }
 
 data class Story(
