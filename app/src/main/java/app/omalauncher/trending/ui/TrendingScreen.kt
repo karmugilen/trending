@@ -107,6 +107,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -117,6 +118,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -131,6 +133,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -371,9 +374,13 @@ private fun NarrowLayout(header: HeaderContent, list: ListContent, listState: La
                 contentPadding = PaddingValues(bottom = bottom + 88.dp),
             ) {
                 item(key = "top") { TopBar(header) }
-                // Source, list and window stay on screen while scrolling.
+                // Source, list and window stay on screen while scrolling with translucent backdrop.
                 stickyHeader(key = "controls") {
-                    Column(Modifier.background(colors.background)) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(colors.background.copy(alpha = 0.94f))
+                    ) {
                         Controls(header, Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
                         LoadingLine(ui.loading && !isPulling)
                         HorizontalDivider(
@@ -892,33 +899,47 @@ private fun barAt(x: Float, width: Int, n: Int): Int =
 private fun MiniAreaCurve(values: List<Double>, tint: Color) {
     val peakV = values.maxOrNull() ?: 0.0
     val n = values.size.coerceAtLeast(1)
-    Canvas(Modifier.fillMaxWidth().height(24.dp)) {
-        if (peakV <= 0.0 || n < 2) return@Canvas
-        val w = size.width
-        val h = size.height
-        val points = values.mapIndexed { i, v ->
-            val x = i * (w / (n - 1).toFloat())
-            val y = h - ((v / peakV) * (h - 4.dp.toPx())).toFloat() - 2.dp.toPx()
-            Offset(x, y)
-        }
-        val linePath = Path().apply {
-            moveTo(points[0].x, points[0].y)
-            for (i in 0 until points.size - 1) {
-                val p0 = points[i]
-                val p1 = points[i + 1]
-                val cx = (p0.x + p1.x) / 2f
-                cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
+    Spacer(
+        Modifier
+            .fillMaxWidth()
+            .height(24.dp)
+            .drawWithCache {
+                if (peakV <= 0.0 || n < 2) {
+                    onDrawBehind { }
+                } else {
+                    val w = size.width
+                    val h = size.height
+                    val points = values.mapIndexed { i, v ->
+                        val x = i * (w / (n - 1).toFloat())
+                        val y = h - ((v / peakV) * (h - 4.dp.toPx())).toFloat() - 2.dp.toPx()
+                        Offset(x, y)
+                    }
+                    val linePath = Path().apply {
+                        moveTo(points[0].x, points[0].y)
+                        for (i in 0 until points.size - 1) {
+                            val p0 = points[i]
+                            val p1 = points[i + 1]
+                            val cx = (p0.x + p1.x) / 2f
+                            cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
+                        }
+                    }
+                    val fillPath = Path().apply {
+                        addPath(linePath)
+                        lineTo(w, h)
+                        lineTo(0f, h)
+                        close()
+                    }
+                    val fillBrush = Brush.verticalGradient(
+                        listOf(tint.copy(alpha = 0.28f), tint.copy(alpha = 0.06f), Color.Transparent)
+                    )
+                    val strokeStyle = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
+                    onDrawBehind {
+                        drawPath(fillPath, brush = fillBrush)
+                        drawPath(linePath, color = tint, style = strokeStyle)
+                    }
+                }
             }
-        }
-        val fillPath = Path().apply {
-            addPath(linePath)
-            lineTo(w, h)
-            lineTo(0f, h)
-            close()
-        }
-        drawPath(fillPath, brush = Brush.verticalGradient(listOf(tint.copy(alpha = 0.25f), Color.Transparent)))
-        drawPath(linePath, color = tint, style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round))
-    }
+    )
 }
 
 @Composable
@@ -934,74 +955,80 @@ private fun SmoothAreaCurve(
     val n = values.size.coerceAtLeast(1)
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Canvas(
+        Spacer(
             Modifier
                 .fillMaxWidth()
                 .height(68.dp)
-                .pointerInput(n) { detectTapGestures { onBar(barAt(it.x, size.width, n)) } },
-        ) {
-            if (peakV <= 0.0 || n < 2) return@Canvas
-            val w = size.width
-            val h = size.height
-            val padTop = 10.dp.toPx()
-            val padBot = 6.dp.toPx()
-            val chartH = h - padTop - padBot
+                .pointerInput(n) { detectTapGestures { onBar(barAt(it.x, size.width, n)) } }
+                .drawWithCache {
+                    if (peakV <= 0.0 || n < 2) {
+                        onDrawBehind { }
+                    } else {
+                        val w = size.width
+                        val h = size.height
+                        val padTop = 10.dp.toPx()
+                        val padBot = 6.dp.toPx()
+                        val chartH = h - padTop - padBot
 
-            val points = values.mapIndexed { i, v ->
-                val x = i * (w / (n - 1).toFloat())
-                val y = h - padBot - ((v / peakV) * chartH).toFloat()
-                Offset(x, y)
-            }
+                        val points = values.mapIndexed { i, v ->
+                            val x = i * (w / (n - 1).toFloat())
+                            val y = h - padBot - ((v / peakV) * chartH).toFloat()
+                            Offset(x, y)
+                        }
 
-            val linePath = Path().apply {
-                moveTo(points[0].x, points[0].y)
-                for (i in 0 until points.size - 1) {
-                    val p0 = points[i]
-                    val p1 = points[i + 1]
-                    val cx = (p0.x + p1.x) / 2f
-                    cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
+                        val linePath = Path().apply {
+                            moveTo(points[0].x, points[0].y)
+                            for (i in 0 until points.size - 1) {
+                                val p0 = points[i]
+                                val p1 = points[i + 1]
+                                val cx = (p0.x + p1.x) / 2f
+                                cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
+                            }
+                        }
+
+                        val fillPath = Path().apply {
+                            addPath(linePath)
+                            lineTo(w, h)
+                            lineTo(0f, h)
+                            close()
+                        }
+                        val fillBrush = Brush.verticalGradient(
+                            colors = listOf(tint.copy(alpha = 0.35f), tint.copy(alpha = 0.08f), Color.Transparent),
+                            startY = padTop,
+                            endY = h,
+                        )
+                        val strokeStyle = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                        val peakOuterRadius = 8.dp.toPx()
+                        val peakMidRadius = 4.dp.toPx()
+                        val peakInnerRadius = 2.5.dp.toPx()
+                        val selLineWidth = 1.dp.toPx()
+                        val selDashEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+
+                        onDrawBehind {
+                            drawPath(fillPath, brush = fillBrush)
+                            drawPath(linePath, color = tint, style = strokeStyle)
+
+                            if (peakIdx in points.indices) {
+                                val peakPt = points[peakIdx]
+                                drawCircle(tint.copy(alpha = 0.25f), radius = peakOuterRadius, center = peakPt)
+                                drawCircle(colors.surface, radius = peakMidRadius, center = peakPt)
+                                drawCircle(tint, radius = peakInnerRadius, center = peakPt)
+                            }
+
+                            if (ui.bar in points.indices) {
+                                val selPt = points[ui.bar]
+                                drawLine(
+                                    color = tint.copy(alpha = 0.6f),
+                                    start = Offset(selPt.x, padTop),
+                                    end = Offset(selPt.x, h),
+                                    strokeWidth = selLineWidth,
+                                    pathEffect = selDashEffect,
+                                )
+                            }
+                        }
+                    }
                 }
-            }
-
-            val fillPath = Path().apply {
-                addPath(linePath)
-                lineTo(w, h)
-                lineTo(0f, h)
-                close()
-            }
-            drawPath(
-                fillPath,
-                brush = Brush.verticalGradient(
-                    colors = listOf(tint.copy(alpha = 0.30f), tint.copy(alpha = 0.02f)),
-                    startY = padTop,
-                    endY = h,
-                ),
-            )
-
-            drawPath(
-                linePath,
-                color = tint,
-                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-            )
-
-            if (peakIdx >= 0 && peakIdx < points.size) {
-                val peakPt = points[peakIdx]
-                drawCircle(tint.copy(alpha = 0.25f), radius = 8.dp.toPx(), center = peakPt)
-                drawCircle(colors.surface, radius = 4.dp.toPx(), center = peakPt)
-                drawCircle(tint, radius = 2.5.dp.toPx(), center = peakPt)
-            }
-
-            if (ui.bar in points.indices) {
-                val selPt = points[ui.bar]
-                drawLine(
-                    color = tint.copy(alpha = 0.6f),
-                    start = Offset(selPt.x, padTop),
-                    end = Offset(selPt.x, h),
-                    strokeWidth = 1.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)),
-                )
-            }
-        }
+        )
     }
 }
 
@@ -1228,6 +1255,7 @@ private data class StoryTag(
     val fg: Color,
     val isCritical: Boolean = false,
     val isWarning: Boolean = false,
+    val isSpecial: Boolean = false,
 )
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1253,14 +1281,16 @@ private fun StoryCard(
     val isCritical = !read && (isStackAffected || isSecurity)
     val isBreakout = !read && !isCritical && (story.has(Flags.BREAKOUT) || (story.has(Flags.RISING) && story.heat >= 40.0))
 
-    val critTransition = rememberInfiniteTransition(label = "critTransition")
-    val pulseAlpha by critTransition.animateFloat(
-        initialValue = if (isCritical) 0.35f else 0.60f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(tween(if (isCritical) 850 else 1300), RepeatMode.Reverse),
-        label = "critAlpha",
-    )
-    val activePulse = if (isCritical || isBreakout) pulseAlpha else 1f
+    // Animation state read is deferred to graphicsLayer so scrolling never recomposes StoryCard
+    val pulseTransition = if (isCritical || isBreakout) {
+        val critTransition = rememberInfiniteTransition(label = "critTransition")
+        critTransition.animateFloat(
+            initialValue = if (isCritical) 0.35f else 0.60f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(tween(if (isCritical) 850 else 1300), RepeatMode.Reverse),
+            label = "critAlpha",
+        )
+    } else null
 
     val accent = when {
         read -> faded
@@ -1283,10 +1313,10 @@ private fun StoryCard(
     val peak = if (ui.mode == Mode.RISING) feed.peakHeat else feed.peak
     val frac = (value / peak.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
 
-    val barColor = when {
+    val barBaseColor = when {
         read -> Color.Transparent
-        isCritical -> colors.error.copy(alpha = activePulse)
-        isBreakout -> colors.primary.copy(alpha = activePulse)
+        isCritical -> colors.error
+        isBreakout -> colors.primary
         else -> accent.copy(alpha = 0.85f)
     }
     val barWidth = if (isCritical) 4.dp else 3.dp
@@ -1299,7 +1329,7 @@ private fun StoryCard(
             isCritical -> colors.errorContainer.copy(alpha = 0.14f)
             else -> colors.surfaceContainer
         },
-        border = if (isCritical) BorderStroke(1.dp, colors.error.copy(alpha = activePulse * 0.45f)) else null,
+        border = if (isCritical) BorderStroke(1.dp, colors.error.copy(alpha = 0.35f)) else null,
         tonalElevation = if (read) 0.dp else if (isCritical) 2.dp else 1.dp,
     ) {
         Row(
@@ -1317,7 +1347,12 @@ private fun StoryCard(
                 Modifier
                     .width(barWidth)
                     .fillMaxHeight()
-                    .background(barColor),
+                    .then(
+                        if (pulseTransition != null) {
+                            Modifier.graphicsLayer { alpha = pulseTransition.value }
+                        } else Modifier
+                    )
+                    .background(barBaseColor),
             )
             Column(
                 Modifier
@@ -1361,7 +1396,7 @@ private fun StoryCard(
                         add(StoryTag("HN + GitHub", colors.tertiaryContainer, colors.onTertiaryContainer))
                     }
                     if (story.has(Flags.NEW_AND_TRENDING)) {
-                        add(StoryTag("New & Trending", colors.secondaryContainer, colors.onSecondaryContainer))
+                        add(StoryTag("New & Trending", colors.secondaryContainer, colors.onSecondaryContainer, isSpecial = true))
                     }
                     if (story.has(Flags.BREAKOUT)) {
                         add(StoryTag("Breakout", colors.primaryContainer, colors.onPrimaryContainer, isWarning = true))
@@ -1383,7 +1418,8 @@ private fun StoryCard(
                                 bg = tag.bg,
                                 fg = tag.fg,
                                 isPulsing = tag.isCritical || tag.isWarning,
-                                pulseAlpha = activePulse,
+                                pulseState = pulseTransition,
+                                isSpecial = tag.isSpecial,
                             )
                         }
                     }
@@ -1501,20 +1537,26 @@ private fun Tag(
     bg: Color,
     fg: Color,
     isPulsing: Boolean = false,
-    pulseAlpha: Float = 1f,
+    pulseState: State<Float>? = null,
+    isSpecial: Boolean = false,
 ) {
     Row(
         modifier = Modifier
             .background(bg, RoundedCornerShape(6.dp))
+            .then(
+                if (isSpecial) Modifier.border(0.75.dp, fg.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                else Modifier
+            )
             .padding(horizontal = 7.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        if (isPulsing) {
+        if (isPulsing && pulseState != null) {
             Box(
                 Modifier
                     .size(6.dp)
-                    .background(fg.copy(alpha = pulseAlpha), CircleShape)
+                    .graphicsLayer { alpha = pulseState.value }
+                    .background(fg, CircleShape)
             )
         }
         Text(
