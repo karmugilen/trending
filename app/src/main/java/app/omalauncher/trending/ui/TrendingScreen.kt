@@ -30,6 +30,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -118,6 +120,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -167,6 +170,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.omalauncher.trending.TrendingUi
 import app.omalauncher.trending.core.TrendingCore
+import app.omalauncher.trending.logic.BucketWindow
 import app.omalauncher.trending.logic.Feed
 import app.omalauncher.trending.logic.Filter
 import app.omalauncher.trending.logic.Flags
@@ -174,6 +178,8 @@ import app.omalauncher.trending.logic.Lang
 import app.omalauncher.trending.logic.Mode
 import app.omalauncher.trending.logic.Source
 import app.omalauncher.trending.logic.Story
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -921,10 +927,12 @@ private fun LanguageDistribution(
 }
 
 /** "14:00–15:00" for bar [index]. */
-private fun barRange(ui: TrendingUi, index: Int): String {
-    val start = ui.window.origin + index.toLong() * ui.window.step
-    return "${TrendingCore.fmtBarLabel(start, 1)}–${TrendingCore.fmtBarLabel(start + ui.window.step, 1)}"
+private fun barRange(window: BucketWindow, index: Int): String {
+    val start = window.origin + index.toLong() * window.step
+    return "${TrendingCore.fmtBarLabel(start, 1)}–${TrendingCore.fmtBarLabel(start + window.step, 1)}"
 }
+
+private fun barRange(ui: TrendingUi, index: Int): String = barRange(ui.window, index)
 
 /** Which of [n] equal bars across [width] an x position falls in. */
 private fun barAt(x: Float, width: Int, n: Int): Int =
@@ -977,6 +985,13 @@ private fun MiniAreaCurve(values: List<Double>, tint: Color) {
     )
 }
 
+private data class CurveData(
+    val hours: Int,
+    val window: BucketWindow,
+    val hotValues: List<Double>,
+    val newValues: List<Double>,
+)
+
 @Composable
 private fun SmoothAreaCurve(
     hotValues: List<Double>,
@@ -985,34 +1000,111 @@ private fun SmoothAreaCurve(
     ui: TrendingUi,
 ) {
     val colors = MaterialTheme.colorScheme
+    val view = LocalView.current
+    var scrubIdx by remember(ui.hours) { mutableIntStateOf(-1) }
     val peakV = hotValues.maxOrNull() ?: 0.0
     val peakIdx = if (peakV > 0.0) hotValues.indexOf(peakV) else -1
-    val peakNew = newValues.maxOrNull() ?: 0.0
     val n = hotValues.size.coerceAtLeast(1)
+
+    val curveData = remember(ui.hours, ui.window, hotValues, newValues) {
+        CurveData(
+            hours = ui.hours,
+            window = ui.window,
+            hotValues = hotValues,
+            newValues = newValues,
+        )
+    }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         AnimatedContent(
-            targetState = ui.hours to hotValues,
+            targetState = curveData,
             transitionSpec = {
-                (fadeIn(tween(220)) + scaleIn(initialScale = 0.98f)) togetherWith
-                    (fadeOut(tween(160)) + scaleOut(targetScale = 1.02f))
+                (fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
+                    scaleIn(initialScale = 0.98f, animationSpec = tween(220, easing = FastOutSlowInEasing)))
+                    .togetherWith(
+                        fadeOut(animationSpec = tween(160, easing = LinearEasing)) +
+                            scaleOut(targetScale = 1.01f, animationSpec = tween(160, easing = LinearEasing))
+                    )
             },
             label = "chartCurveSwitch",
-        ) { (_, currentHotValues) ->
-            val curPeakV = currentHotValues.maxOrNull() ?: 0.0
-            val curPeakIdx = if (curPeakV > 0.0) currentHotValues.indexOf(curPeakV) else -1
-            val curN = currentHotValues.size.coerceAtLeast(1)
-
-            val animProgress = remember(ui.hours, currentHotValues) { Animatable(0f) }
-            LaunchedEffect(ui.hours, currentHotValues) {
-                animProgress.snapTo(0f)
-                animProgress.animateTo(1f, animationSpec = tween(450, easing = FastOutSlowInEasing))
-            }
+        ) { target ->
+            val curHotValues = target.hotValues
+            val curNewValues = target.newValues
+            val curPeakV = curHotValues.maxOrNull() ?: 0.0
+            val curPeakIdx = if (curPeakV > 0.0) curHotValues.indexOf(curPeakV) else -1
+            val curPeakNew = curNewValues.maxOrNull() ?: 0.0
+            val curN = curHotValues.size.coerceAtLeast(1)
 
             Spacer(
                 Modifier
                     .fillMaxWidth()
                     .height(78.dp)
+                    .pointerInput(curN) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val pointerId = down.id
+                            var isScrubbing = false
+                            val touchSlop = viewConfiguration.touchSlop
+                            var totalDx = 0f
+                            var totalDy = 0f
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+
+                                if (!change.pressed) {
+                                    if (!isScrubbing && abs(totalDx) < touchSlop && abs(totalDy) < touchSlop) {
+                                        val tapIdx = if (curN > 1) {
+                                            ((down.position.x / size.width) * (curN - 1)).roundToInt().coerceIn(0, curN - 1)
+                                        } else 0
+                                        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                                        scrubIdx = if (scrubIdx == tapIdx) -1 else tapIdx
+                                    }
+                                    break
+                                }
+
+                                val dx = change.position.x - down.position.x
+                                val dy = change.position.y - down.position.y
+
+                                if (!isScrubbing) {
+                                    if (change.isConsumed) break
+
+                                    totalDx = dx
+                                    totalDy = dy
+
+                                    if (abs(totalDy) > touchSlop && abs(totalDy) > abs(totalDx)) {
+                                        // Vertical scroll priority: let LazyColumn handle scrolling without interception
+                                        break
+                                    } else if (abs(totalDx) > touchSlop && abs(totalDx) > abs(totalDy)) {
+                                        // Horizontal scrub claimed
+                                        isScrubbing = true
+                                        change.consume()
+                                        val newIdx = if (curN > 1) {
+                                            ((change.position.x / size.width) * (curN - 1)).roundToInt().coerceIn(0, curN - 1)
+                                        } else 0
+                                        if (newIdx != scrubIdx) {
+                                            scrubIdx = newIdx
+                                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                        }
+                                    }
+                                } else {
+                                    // Smooth continuous scrubbing left to right, right to left
+                                    change.consume()
+                                    val newIdx = if (curN > 1) {
+                                        ((change.position.x / size.width) * (curN - 1)).roundToInt().coerceIn(0, curN - 1)
+                                    } else 0
+                                    if (newIdx != scrubIdx) {
+                                        scrubIdx = newIdx
+                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    }
+                                }
+                            }
+
+                            if (isScrubbing) {
+                                scrubIdx = -1
+                            }
+                        }
+                    }
                     .drawWithCache {
                         if (curPeakV <= 0.0 || curN < 2) {
                             onDrawBehind { }
@@ -1025,7 +1117,7 @@ private fun SmoothAreaCurve(
                             val colW = (w / curN).coerceAtLeast(4f)
                             val barPillarW = (colW * 0.42f).coerceIn(4f, 14f)
 
-                            val points = currentHotValues.mapIndexed { i, v ->
+                            val points = curHotValues.mapIndexed { i, v ->
                                 val x = i * (w / (curN - 1).toFloat())
                                 val y = h - padBot - ((v / curPeakV) * chartH).toFloat()
                                 Offset(x, y)
@@ -1057,43 +1149,50 @@ private fun SmoothAreaCurve(
                             val peakOuterRadius = 8.dp.toPx()
                             val peakMidRadius = 4.dp.toPx()
                             val peakInnerRadius = 2.dp.toPx()
+                            val selLineWidth = 1.5.dp.toPx()
+                            val selDashEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
 
                             onDrawBehind {
-                                val progress = animProgress.value
-                                val sweepX = w * progress
-
                                 // Subtle story submission volume pillars underneath
-                                if (peakNew > 0.0) {
-                                    for (i in newValues.indices) {
-                                        val count = newValues[i]
+                                if (curPeakNew > 0.0) {
+                                    for (i in curNewValues.indices) {
+                                        val count = curNewValues[i]
                                         if (count > 0.0) {
-                                            val barH = ((count / peakNew) * (chartH * 0.45f)).toFloat().coerceAtLeast(2f)
+                                            val barH = ((count / curPeakNew) * (chartH * 0.45f)).toFloat().coerceAtLeast(2f)
                                             val centerX = if (curN > 1) i * (w / (curN - 1).toFloat()) else w / 2f
-                                            if (centerX <= sweepX + barPillarW) {
-                                                drawRoundRect(
-                                                    color = colors.onSurfaceVariant.copy(alpha = 0.09f),
-                                                    topLeft = Offset(centerX - barPillarW / 2f, h - padBot - barH),
-                                                    size = Size(barPillarW, barH),
-                                                    cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
-                                                )
-                                            }
+                                            val isHighlight = scrubIdx == i
+                                            drawRoundRect(
+                                                color = if (isHighlight) tint.copy(alpha = 0.28f) else colors.onSurfaceVariant.copy(alpha = 0.09f),
+                                                topLeft = Offset(centerX - barPillarW / 2f, h - padBot - barH),
+                                                size = Size(barPillarW, barH),
+                                                cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+                                            )
                                         }
                                     }
                                 }
 
-                                clipRect(right = sweepX) {
-                                    drawPath(fillPath, brush = fillBrush)
-                                    drawPath(linePath, color = tint.copy(alpha = 0.16f), style = glowStyle)
-                                    drawPath(linePath, color = tint, style = strokeStyle)
-                                }
+                                // Fully rendered curve and area - always visible, never clipped out
+                                drawPath(fillPath, brush = fillBrush)
+                                drawPath(linePath, color = tint.copy(alpha = 0.16f), style = glowStyle)
+                                drawPath(linePath, color = tint, style = strokeStyle)
 
-                                if (curPeakIdx in points.indices) {
+                                if (scrubIdx in points.indices) {
+                                    val selPt = points[scrubIdx]
+                                    drawLine(
+                                        color = tint.copy(alpha = 0.70f),
+                                        start = Offset(selPt.x, padTop),
+                                        end = Offset(selPt.x, h - padBot),
+                                        strokeWidth = selLineWidth,
+                                        pathEffect = selDashEffect,
+                                    )
+                                    drawCircle(tint.copy(alpha = 0.30f), radius = 9.dp.toPx(), center = selPt)
+                                    drawCircle(colors.surface, radius = 5.dp.toPx(), center = selPt)
+                                    drawCircle(tint, radius = 3.dp.toPx(), center = selPt)
+                                } else if (curPeakIdx in points.indices) {
                                     val peakPt = points[curPeakIdx]
-                                    if (peakPt.x <= sweepX) {
-                                        drawCircle(tint.copy(alpha = 0.25f), radius = peakOuterRadius, center = peakPt)
-                                        drawCircle(colors.surface, radius = peakMidRadius, center = peakPt)
-                                        drawCircle(tint, radius = peakInnerRadius, center = peakPt)
-                                    }
+                                    drawCircle(tint.copy(alpha = 0.25f), radius = peakOuterRadius, center = peakPt)
+                                    drawCircle(colors.surface, radius = peakMidRadius, center = peakPt)
+                                    drawCircle(tint, radius = peakInnerRadius, center = peakPt)
                                 }
                             }
                         }
@@ -1114,16 +1213,37 @@ private fun SmoothAreaCurve(
             Text("Now", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant.copy(alpha = 0.6f))
         }
 
-        // Peak activity description (passive, no lock)
-        if (peakIdx in hotValues.indices && hotValues[peakIdx] > 0) {
-            val peakPts = TrendingCore.fmtCompact(hotValues[peakIdx])
-            val peakStories = newValues.getOrNull(peakIdx)?.toInt() ?: 0
-            Text(
-                text = "Peak: ${barRange(ui, peakIdx)} ($peakPts pts, $peakStories ${if (peakStories == 1) "story" else "stories"})",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
+        // Live scrub feedback & peak description
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            if (scrubIdx in hotValues.indices) {
+                val pts = TrendingCore.fmtCompact(hotValues[scrubIdx])
+                val stories = newValues.getOrNull(scrubIdx)?.toInt() ?: 0
+                Text(
+                    text = "${barRange(ui.window, scrubIdx)}: $pts pts · $stories ${if (stories == 1) "story" else "stories"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = tint,
+                )
+                Text(
+                    text = "Clear",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable { scrubIdx = -1 },
+                )
+            } else if (peakIdx in hotValues.indices && hotValues[peakIdx] > 0) {
+                val peakPts = TrendingCore.fmtCompact(hotValues[peakIdx])
+                val peakStories = newValues.getOrNull(peakIdx)?.toInt() ?: 0
+                Text(
+                    text = "Peak: ${barRange(ui.window, peakIdx)} ($peakPts pts, $peakStories ${if (peakStories == 1) "story" else "stories"}) · Drag to scrub",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
         }
     }
 }
