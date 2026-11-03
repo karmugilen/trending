@@ -1,0 +1,4 @@
+• Instant Hacker News & GitHub breakout radar.
+• Velocity metrics and frequency equalizer visualization.
+• Multi-ABI high performance native Rust engine paired with Jetpack Compose.
+• Offline caching and zero-tracking privacy-first design.
