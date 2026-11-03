@@ -2,6 +2,7 @@ package app.omalauncher.trending.ui
 
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -20,6 +21,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -123,6 +125,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
@@ -796,32 +799,41 @@ private fun ChartCard(
                 }
             }
 
-            if (isGh) {
-                if (feed.langs.isNotEmpty()) {
-                    LanguageDistribution(
-                        langs = feed.langs,
-                        selectedLang = ui.lang,
-                        expanded = expanded,
-                        onLang = onLang,
-                    )
-                }
-            } else {
-                if (!expanded) {
-                    MiniAreaCurve(feed.hotBars, colors.primary)
-                } else {
-                    SmoothAreaCurve(
-                        values = feed.hotBars,
-                        tint = colors.primary,
-                        ui = ui,
-                        onBar = onBar,
-                    )
-                    val peak = feed.newBars.indices.maxByOrNull { feed.hotBars[it] }
-                    if (peak != null && feed.hotBars[peak] > 0) {
-                        Text(
-                            "Peak activity at ${barRange(ui, peak)} (${TrendingCore.fmtCompact(feed.hotBars[peak])} pts)",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.primary,
+            AnimatedContent(
+                targetState = isGh,
+                transitionSpec = {
+                    (fadeIn(tween(250)) + scaleIn(initialScale = 0.98f)) togetherWith
+                        (fadeOut(tween(180)) + scaleOut(targetScale = 0.98f))
+                },
+                label = "chartModeSwitch",
+            ) { targetIsGh ->
+                if (targetIsGh) {
+                    if (feed.langs.isNotEmpty()) {
+                        LanguageDistribution(
+                            langs = feed.langs,
+                            selectedLang = ui.lang,
+                            expanded = expanded,
+                            onLang = onLang,
                         )
+                    }
+                } else {
+                    if (!expanded) {
+                        MiniAreaCurve(feed.hotBars, colors.primary)
+                    } else {
+                        SmoothAreaCurve(
+                            values = feed.hotBars,
+                            tint = colors.primary,
+                            ui = ui,
+                            onBar = onBar,
+                        )
+                        val peak = feed.newBars.indices.maxByOrNull { feed.hotBars[it] }
+                        if (peak != null && feed.hotBars[peak] > 0) {
+                            Text(
+                                "Peak activity at ${barRange(ui, peak)} (${TrendingCore.fmtCompact(feed.hotBars[peak])} pts)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.primary,
+                            )
+                        }
                     }
                 }
             }
@@ -840,25 +852,35 @@ private fun LanguageDistribution(
     val colors = MaterialTheme.colorScheme
     val total = langs.sumOf { it.count }.coerceAtLeast(1)
 
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth().animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .height(10.dp)
+                .clip(RoundedCornerShape(5.dp))
                 .background(colors.surfaceContainerHighest),
         ) {
             Row(Modifier.fillMaxSize()) {
                 for (lang in langs) {
                     val weight = (lang.count.toFloat() / total).coerceAtLeast(0.01f)
+                    val animatedWeight by animateFloatAsState(
+                        targetValue = weight,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing),
+                        label = "langWeight_${lang.name}",
+                    )
                     val isSelected = selectedLang.isNotEmpty() && selectedLang.equals(lang.name, ignoreCase = true)
                     val color = langColor(lang.name)
+                    val animatedAlpha by animateFloatAsState(
+                        targetValue = if (selectedLang.isEmpty() || isSelected) 1.0f else 0.25f,
+                        animationSpec = tween(250),
+                        label = "langAlpha_${lang.name}",
+                    )
                     Box(
                         Modifier
-                            .weight(weight)
+                            .weight(animatedWeight.coerceAtLeast(0.005f))
                             .fillMaxHeight()
                             .padding(horizontal = 0.5.dp)
-                            .background(if (selectedLang.isEmpty() || isSelected) color else color.copy(alpha = 0.25f)),
+                            .background(color.copy(alpha = animatedAlpha)),
                     )
                 }
             }
@@ -1177,7 +1199,11 @@ private fun LazyListScope.storyList(list: ListContent, pad: Modifier) {
             EmptyState(ui, onClearSearch = list.onClearSearch, onClearNarrowing = list.actions.onClearNarrowing, modifier = pad)
         }
         else -> {
-            itemsIndexed(feed.shown, key = { _, story -> story.id }) { index, story ->
+            itemsIndexed(
+                items = feed.shown,
+                key = { _, story -> story.id },
+                contentType = { _, _ -> "story" },
+            ) { index, story ->
                 StoryCard(
                     story = story,
                     index = index,
@@ -1188,7 +1214,11 @@ private fun LazyListScope.storyList(list: ListContent, pad: Modifier) {
                     onOpen = list.onOpen,
                     onLongPress = { list.onLongPress(story) },
                     onToggleSaved = { list.onToggleSaved(story) },
-                    modifier = pad.padding(bottom = 10.dp).animateItem(),
+                    modifier = pad.padding(bottom = 10.dp).animateItem(
+                        fadeInSpec = tween(280),
+                        fadeOutSpec = tween(180),
+                        placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy),
+                    ),
                 )
             }
             if (feed.matching > feed.shown.size) {
@@ -1324,15 +1354,17 @@ private fun StoryCard(
         else -> colors.primary
     }
     val shape = RoundedCornerShape(16.dp)
-    val meta = buildList {
-        if (hn) {
-            if (story.domain.isNotEmpty()) add(story.domain) else add("Hacker News")
-            if (story.meta.isNotEmpty()) add("by ${story.meta}")
-        } else if (story.meta.isNotEmpty()) {
-            add(story.meta)
-        }
-        if (story.t > 0) add(agoPhrase(story.t, ui.nowSec))
-    }.joinToString(" · ")
+    val meta = remember(story.domain, story.meta, story.t, ui.nowSec / 60) {
+        buildList {
+            if (hn) {
+                if (story.domain.isNotEmpty()) add(story.domain) else add("Hacker News")
+                if (story.meta.isNotEmpty()) add("by ${story.meta}")
+            } else if (story.meta.isNotEmpty()) {
+                add(story.meta)
+            }
+            if (story.t > 0) add(agoPhrase(story.t, ui.nowSec))
+        }.joinToString(" · ")
+    }
     val value = if (ui.mode == Mode.RISING) story.heat else story.score
     val peak = if (ui.mode == Mode.RISING) feed.peakHeat else feed.peak
     val frac = (value / peak.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
@@ -1369,29 +1401,27 @@ private fun StoryCard(
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(IntrinsicSize.Min)
                 .clip(shape)
+                .drawBehind {
+                    if (barBaseColor != Color.Transparent) {
+                        val alpha = pulseTransition?.value ?: 1f
+                        drawRect(
+                            color = barBaseColor.copy(alpha = barBaseColor.alpha * alpha),
+                            topLeft = Offset.Zero,
+                            size = Size(barWidth.toPx(), size.height),
+                        )
+                    }
+                }
                 .combinedClickable(
                     onClick = { onOpen(story.url, story.id) },
                     onLongClick = onLongPress,
                     onLongClickLabel = "More actions",
                 ),
         ) {
-            Box(
-                Modifier
-                    .width(barWidth)
-                    .fillMaxHeight()
-                    .then(
-                        if (pulseTransition != null) {
-                            Modifier.graphicsLayer { alpha = pulseTransition.value }
-                        } else Modifier
-                    )
-                    .background(barBaseColor),
-            )
             Column(
                 Modifier
                     .weight(1f)
-                    .padding(start = 12.dp, end = 14.dp, top = 12.dp, bottom = 10.dp),
+                    .padding(start = 12.dp + barWidth, end = 14.dp, top = 12.dp, bottom = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Row(verticalAlignment = Alignment.Top) {
@@ -1422,27 +1452,29 @@ private fun StoryCard(
                         }
                     }
                 }
-                val tags = buildList {
-                    if (isStackAffected) {
-                        add(StoryTag("In your stack: ${story.affectsStack.ifEmpty { "dependency" }}", colors.errorContainer, colors.onErrorContainer, isCritical = true))
+                val tags = remember(story.flags, story.affectsStack, story.crossSource, story.matched, story.tag) {
+                    buildList {
+                        if (isStackAffected) {
+                            add(StoryTag("In your stack: ${story.affectsStack.ifEmpty { "dependency" }}", colors.errorContainer, colors.onErrorContainer, isCritical = true))
+                        }
+                        if (story.crossSource || story.has(Flags.CROSS_SOURCE)) {
+                            add(StoryTag("HN + GitHub", colors.tertiaryContainer, colors.onTertiaryContainer))
+                        }
+                        if (story.has(Flags.NEW_AND_TRENDING)) {
+                            add(StoryTag("New & Trending", colors.secondaryContainer, colors.onSecondaryContainer, isSpecial = true))
+                        }
+                        if (story.has(Flags.BREAKOUT)) {
+                            add(StoryTag("Breakout", colors.primaryContainer, colors.onPrimaryContainer, isWarning = true))
+                        }
+                        if (isSecurity) {
+                            add(StoryTag(story.tag.ifEmpty { "Security" }.replaceFirstChar { it.uppercase() }, colors.errorContainer, colors.onErrorContainer, isCritical = true))
+                        }
+                        if (story.has(Flags.RISING)) {
+                            add(StoryTag("Rising fast", colors.primaryContainer, colors.onPrimaryContainer, isWarning = story.heat >= 40.0))
+                        }
+                        if (story.has(Flags.INTEREST)) add(StoryTag(story.matched, colors.tertiaryContainer, colors.onTertiaryContainer))
+                        if (story.has(Flags.SPAM)) add(StoryTag("Likely spam", colors.surfaceVariant, colors.onSurfaceVariant))
                     }
-                    if (story.crossSource || story.has(Flags.CROSS_SOURCE)) {
-                        add(StoryTag("HN + GitHub", colors.tertiaryContainer, colors.onTertiaryContainer))
-                    }
-                    if (story.has(Flags.NEW_AND_TRENDING)) {
-                        add(StoryTag("New & Trending", colors.secondaryContainer, colors.onSecondaryContainer, isSpecial = true))
-                    }
-                    if (story.has(Flags.BREAKOUT)) {
-                        add(StoryTag("Breakout", colors.primaryContainer, colors.onPrimaryContainer, isWarning = true))
-                    }
-                    if (isSecurity) {
-                        add(StoryTag(story.tag.ifEmpty { "Security" }.replaceFirstChar { it.uppercase() }, colors.errorContainer, colors.onErrorContainer, isCritical = true))
-                    }
-                    if (story.has(Flags.RISING)) {
-                        add(StoryTag("Rising fast", colors.primaryContainer, colors.onPrimaryContainer, isWarning = story.heat >= 40.0))
-                    }
-                    if (story.has(Flags.INTEREST)) add(StoryTag(story.matched, colors.tertiaryContainer, colors.onTertiaryContainer))
-                    if (story.has(Flags.SPAM)) add(StoryTag("Likely spam", colors.surfaceVariant, colors.onSurfaceVariant))
                 }
                 if (tags.isNotEmpty() && !read) {
                     Row(Modifier.padding(start = 26.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
