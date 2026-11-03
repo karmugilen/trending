@@ -32,7 +32,7 @@ data class Settings(
     /** Index into ui.Palettes. 0 is the original amber. */
     val palette: Int = 0,
     /** Material You wallpaper colors on Android 12+. Overrides [palette] when on. */
-    val dynamicColor: Boolean = false,
+    val dynamicColor: Boolean = true,
     val hideSpam: Boolean = true,
     /** Full activity charts above the list, or the compact strip. */
     val chartExpanded: Boolean = true,
@@ -101,7 +101,7 @@ class SettingsStore private constructor(context: Context) {
             seen = strings(KEY_SEEN),
             themeMode = ThemeMode.from(prefs.getString("theme", null)),
             palette = prefs.getInt("palette", 0),
-            dynamicColor = prefs.getBoolean("dynamic", false),
+            dynamicColor = prefs.getBoolean("dynamic", true),
             hideSpam = prefs.getBoolean("hideSpam", true),
             // Before schema 2 the compact strip was the default; everyone starts on the full charts once.
             chartExpanded = prefs.getInt(KEY_SCHEMA, 1) < SCHEMA || prefs.getBoolean("chartExpanded", true),
