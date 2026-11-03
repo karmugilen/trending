@@ -4,17 +4,22 @@ import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -460,7 +465,11 @@ private fun WideLayout(header: HeaderContent, list: ListContent, listState: Lazy
 @Composable
 private fun LoadingLine(loading: Boolean) {
     Box(Modifier.fillMaxWidth().height(2.dp)) {
-        if (loading) {
+        AnimatedVisibility(
+            visible = loading,
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(300)),
+        ) {
             LinearProgressIndicator(Modifier.fillMaxSize(), trackColor = Color.Transparent)
         }
     }
@@ -648,23 +657,32 @@ private fun Controls(header: HeaderContent, modifier: Modifier = Modifier) {
                 }
 
                 // Modes (only when not in Official Trending)
-                if (!isOfficial) {
-                    VerticalDivider(
-                        Modifier.height(18.dp).padding(horizontal = 2.dp),
-                        color = colors.outlineVariant.copy(alpha = 0.5f),
-                    )
-                    val modes = listOf(Mode.HOT to "Top", Mode.RISING to "Rising", Mode.NEW to "New")
-                    for ((m, label) in modes) {
-                        val sel = ui.mode == m
-                        FilterChip(
-                            selected = sel,
-                            onClick = { header.buzz(); header.actions.onMode(m) },
-                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = colors.secondaryContainer,
-                                selectedLabelColor = colors.onSecondaryContainer,
-                            ),
+                AnimatedVisibility(
+                    visible = !isOfficial,
+                    enter = fadeIn(tween(200)) + expandHorizontally(),
+                    exit = fadeOut(tween(150)) + shrinkHorizontally(),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        VerticalDivider(
+                            Modifier.height(18.dp).padding(horizontal = 2.dp),
+                            color = colors.outlineVariant.copy(alpha = 0.5f),
                         )
+                        val modes = listOf(Mode.HOT to "Top", Mode.RISING to "Rising", Mode.NEW to "New")
+                        for ((m, label) in modes) {
+                            val sel = ui.mode == m
+                            FilterChip(
+                                selected = sel,
+                                onClick = { header.buzz(); header.actions.onMode(m) },
+                                label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = colors.secondaryContainer,
+                                    selectedLabelColor = colors.onSecondaryContainer,
+                                ),
+                            )
+                        }
                     }
                 }
 
@@ -1214,9 +1232,15 @@ private fun ListHeader(list: ListContent, modifier: Modifier) {
             )
             Text(listNoteFor(ui, feed), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
-        when {
-            ui.narrowed -> TextButton(onClick = { list.buzz(); list.actions.onClearNarrowing() }) { Text("Show all") }
-            ui.seen.isNotEmpty() -> TextButton(onClick = list.onClearMarks) { Text("Clear read") }
+        AnimatedVisibility(
+            visible = ui.narrowed || ui.seen.isNotEmpty(),
+            enter = fadeIn(tween(200)) + scaleIn(),
+            exit = fadeOut(tween(150)) + scaleOut(),
+        ) {
+            when {
+                ui.narrowed -> TextButton(onClick = { list.buzz(); list.actions.onClearNarrowing() }) { Text("Show all") }
+                ui.seen.isNotEmpty() -> TextButton(onClick = list.onClearMarks) { Text("Clear read") }
+            }
         }
     }
 }
@@ -1312,6 +1336,16 @@ private fun StoryCard(
     val value = if (ui.mode == Mode.RISING) story.heat else story.score
     val peak = if (ui.mode == Mode.RISING) feed.peakHeat else feed.peak
     val frac = (value / peak.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+    val animatedFrac by animateFloatAsState(
+        targetValue = frac,
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "scoreFrac",
+    )
+    val saveScale by animateFloatAsState(
+        targetValue = if (saved) 1.22f else 1.0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "saveScale",
+    )
 
     val barBaseColor = when {
         read -> Color.Transparent
@@ -1492,7 +1526,12 @@ private fun StoryCard(
                             if (saved) AppIcons.Bookmark else AppIcons.BookmarkBorder,
                             contentDescription = if (saved) "Remove from saved" else "Save for later",
                             tint = if (saved) colors.primary else faded,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier
+                                .size(20.dp)
+                                .graphicsLayer {
+                                    scaleX = saveScale
+                                    scaleY = saveScale
+                                },
                         )
                     }
                 }
@@ -1505,7 +1544,7 @@ private fun StoryCard(
                 ) {
                     Box(
                         Modifier
-                            .fillMaxWidth(frac)
+                            .fillMaxWidth(animatedFrac)
                             .fillMaxHeight()
                             .background(accent.copy(alpha = if (read) 0.4f else 0.9f), RoundedCornerShape(2.dp)),
                     )
