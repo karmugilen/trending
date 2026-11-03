@@ -6,27 +6,33 @@ AuthorName: Karmugil
 WebSite: https://github.com/karmugilen/trending
 SourceCode: https://github.com/karmugilen/trending
 IssueTracker: https://github.com/karmugilen/trending/issues
+Changelog: https://github.com/karmugilen/trending/releases
 
 AutoName: Trending
 
 RepoType: git
 Repo: https://github.com/karmugilen/trending.git
+Binaries: https://github.com/karmugilen/trending/releases/download/v%v/app-universal-release.apk
 
 Builds:
   - versionName: 1.5.1
     versionCode: 8
     commit: v1.5.1
+    subdir: app
     sudo:
       - apt-get update
-      - apt-get install -y gcc libc6-dev rustup
+      - apt-get install -y gcc libc6-dev
+    srclibs:
+      - rustup@1.29.2
     gradle:
       - yes
     gradleprops:
       - allAbis
-    build:
-      - rustup default stable
-      - rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
-    output: app/build/outputs/apk/release/app-universal-release-unsigned.apk
+    prebuild:
+      - $$rustup$$/rustup-init.sh -y --profile minimal --default-toolchain stable
+        --target aarch64-linux-android --target armv7-linux-androideabi
+        --target x86_64-linux-android --target i686-linux-android
+    output: build/outputs/apk/release/app-universal-release-unsigned.apk
     ndk: r26b
 
 AutoUpdateMode: Version
