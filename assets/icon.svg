@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="54" y1="0" x2="54" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1C1A17"/>
+      <stop offset="1" stop-color="#121212"/>
+    </linearGradient>
+    <linearGradient id="trend" x1="32" y1="70" x2="76" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF5722"/>
+      <stop offset="0.55" stop-color="#FFA000"/>
+      <stop offset="1" stop-color="#FFE082"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="65" y1="39" x2="76" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFA000"/>
+      <stop offset="1" stop-color="#FFE082"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background with smooth rounded rectangle -->
+  <rect width="108" height="108" rx="24" fill="url(#bg)"/>
+
+  <!-- Outer radar range arc -->
+  <path d="M34,30 A44,44 0 0,1 78,74" fill="none" stroke="#FFB300" stroke-opacity="0.2" stroke-width="1.75" stroke-linecap="round"/>
+
+  <!-- Inner radar range arc -->
+  <path d="M34,48 A26,26 0 0,1 60,74" fill="none" stroke="#FFB300" stroke-opacity="0.3" stroke-width="1.75" stroke-linecap="round"/>
+
+  <!-- Radar baseline axis -->
+  <path d="M30,74 H78" fill="none" stroke="#FFFFFF" stroke-opacity="0.15" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Trend line glow / shadow -->
+  <path d="M32,70 C42,70 46,58 56,48 C64,40 68,34 76,28 M65,28 H76 V39" fill="none" stroke="#FF3D00" stroke-opacity="0.25" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Sharp breakout trend line -->
+  <path d="M32,70 C42,70 46,58 56,48 C64,40 68,34 76,28" fill="none" stroke="url(#trend)" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- Arrowhead -->
+  <path d="M65,28 H76 V39" fill="none" stroke="url(#arrow)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Criticality pulse beacon ring at inflection point -->
+  <circle cx="56" cy="48" r="6" fill="none" stroke="#FF5722" stroke-opacity="0.5" stroke-width="1.5"/>
+
+  <!-- Pulse beacon core dot -->
+  <circle cx="56" cy="48" r="2.5" fill="#FFE082"/>
+</svg>

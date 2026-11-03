@@ -19,8 +19,14 @@ android {
         targetSdk = 34
         versionCode = 6
         versionName = "1.5.0"
-        ndk {
-            abiFilters += listOf("arm64-v8a")
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            isUniversalApk = true
         }
     }
 
@@ -66,7 +72,6 @@ android {
     sourceSets.getByName("main").jniLibs.srcDir(layout.buildDirectory.dir("rustJniLibs"))
 }
 
-val rustTarget = "aarch64-linux-android"
 val home = System.getProperty("user.home")
 
 // cargo from $CARGO, ~/.cargo, /root/.cargo (the phone build), or PATH.
@@ -77,8 +82,6 @@ val sdkDir = localProps.getProperty("sdk.dir") ?: System.getenv("ANDROID_HOME") 
 val ndkDir: File? = System.getenv("ANDROID_NDK_HOME")?.let(::File)?.takeIf { it.isDirectory }
     ?: sdkDir?.let { File(it, "ndk").listFiles()?.filter { dir -> dir.isDirectory }?.maxByOrNull { dir -> dir.name } }
 
-// The NDK ships x86-64 host tools. On an aarch64 machine they cannot run, so
-// android-link.sh drives the host clang against the NDK sysroot instead.
 val osName = System.getProperty("os.name").lowercase()
 val hostTag = when {
     osName.contains("mac") -> "darwin-x86_64"
@@ -87,24 +90,53 @@ val hostTag = when {
 }
 val armHost = System.getProperty("os.arch") in setOf("aarch64", "arm64") && !osName.contains("mac")
 val ndkBin = ndkDir?.resolve("toolchains/llvm/prebuilt/$hostTag/bin")
-val ndkClang = ndkBin?.resolve(if (osName.contains("win")) "aarch64-linux-android26-clang.cmd" else "aarch64-linux-android26-clang")
-val androidLinker: File = if (!armHost && ndkClang?.isFile == true) ndkClang else rootProject.file("core/android-link.sh")
 val androidAr: String = ndkBin?.resolve("llvm-ar")?.takeIf { !armHost && it.isFile }?.absolutePath ?: "/usr/bin/llvm-ar"
 
-tasks.register<Exec>("buildTrendingRust") {
-    group = "build"
-    description = "Optimized Rust release library for arm64 Android"
-    workingDir = rootProject.file("core")
-    inputs.dir(rootProject.file("core/src"))
-    inputs.file(rootProject.file("core/Cargo.toml"))
-    inputs.file(rootProject.file("core/android-link.sh"))
-    outputs.file(rootProject.file("core/target/$rustTarget/release/libtrending.so"))
-    environment("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", androidLinker.absolutePath)
-    environment("CC_aarch64_linux_android", androidLinker.absolutePath)
-    environment("CARGO_TARGET_AARCH64_LINUX_ANDROID_AR", androidAr)
-    environment("AR_aarch64_linux_android", androidAr)
-    ndkDir?.let { environment("ANDROID_NDK_HOME", it.absolutePath) }
-    commandLine(cargo, "build", "--release", "--target", rustTarget)
+data class RustTargetConfig(
+    val abi: String,
+    val rustTarget: String,
+    val clangPrefix: String,
+)
+
+val rustTargets = listOf(
+    RustTargetConfig("arm64-v8a", "aarch64-linux-android", "aarch64-linux-android26-clang"),
+    RustTargetConfig("armeabi-v7a", "armv7-linux-androideabi", "armv7a-linux-androideabi26-clang"),
+    RustTargetConfig("x86_64", "x86_64-linux-android", "x86_64-linux-android26-clang"),
+    RustTargetConfig("x86", "i686-linux-android", "i686-linux-android26-clang"),
+)
+
+val copyTasks = rustTargets.map { target ->
+    val buildTask = tasks.register<Exec>("buildTrendingRust_${target.abi}") {
+        group = "build"
+        description = "Optimized Rust release library for ${target.abi}"
+        workingDir = rootProject.file("core")
+        inputs.dir(rootProject.file("core/src"))
+        inputs.file(rootProject.file("core/Cargo.toml"))
+        outputs.file(rootProject.file("core/target/${target.rustTarget}/release/libtrending.so"))
+
+        val clang = ndkBin?.resolve(if (osName.contains("win")) "${target.clangPrefix}.cmd" else target.clangPrefix)
+        val linker = if (!armHost && clang?.isFile == true) clang else rootProject.file("core/android-link.sh")
+        val targetEnv = target.rustTarget.replace("-", "_").uppercase()
+        val targetUnder = target.rustTarget.replace("-", "_")
+
+        environment("PATH", "$home/.cargo/bin:" + (System.getenv("PATH") ?: ""))
+        environment("CARGO_TARGET_${targetEnv}_LINKER", linker.absolutePath)
+        environment("CC_${targetUnder}", linker.absolutePath)
+        environment("CARGO_TARGET_${targetEnv}_AR", androidAr)
+        environment("AR_${targetUnder}", androidAr)
+        ndkDir?.let { environment("ANDROID_NDK_HOME", it.absolutePath) }
+        commandLine(cargo, "build", "--release", "--target", target.rustTarget)
+    }
+
+    tasks.register<Copy>("copyTrendingRust_${target.abi}") {
+        dependsOn(buildTask)
+        from(rootProject.file("core/target/${target.rustTarget}/release/libtrending.so"))
+        into(layout.buildDirectory.dir("rustJniLibs/${target.abi}"))
+    }
+}
+
+val copyAllRust = tasks.register("copyTrendingRust") {
+    dependsOn(copyTasks)
 }
 
 tasks.register<Exec>("testTrendingRust") {
@@ -114,14 +146,8 @@ tasks.register<Exec>("testTrendingRust") {
     commandLine(cargo, "test")
 }
 
-tasks.register<Copy>("copyTrendingRust") {
-    dependsOn("buildTrendingRust")
-    from(rootProject.file("core/target/$rustTarget/release/libtrending.so"))
-    into(layout.buildDirectory.dir("rustJniLibs/arm64-v8a"))
-}
-
 tasks.named("preBuild").configure {
-    dependsOn("copyTrendingRust")
+    dependsOn(copyAllRust)
 }
 
 dependencies {
