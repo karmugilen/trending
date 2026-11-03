@@ -29,7 +29,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -991,119 +991,132 @@ private fun SmoothAreaCurve(
     val n = hotValues.size.coerceAtLeast(1)
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Spacer(
-            Modifier
-                .fillMaxWidth()
-                .height(78.dp)
-                .pointerInput(n) {
-                    detectDragGestures(
-                        onDragStart = { offset -> onBar(barAt(offset.x, size.width, n)) },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            onBar(barAt(change.position.x, size.width, n))
-                        },
-                    )
-                }
-                .pointerInput(n, ui.bar) {
-                    detectTapGestures { offset ->
-                        val tapped = barAt(offset.x, size.width, n)
-                        onBar(if (ui.bar == tapped) -1 else tapped)
-                    }
-                }
-                .drawWithCache {
-                    if (peakV <= 0.0 || n < 2) {
-                        onDrawBehind { }
-                    } else {
-                        val w = size.width
-                        val h = size.height
-                        val padTop = 10.dp.toPx()
-                        val padBot = 6.dp.toPx()
-                        val chartH = h - padTop - padBot
-                        val colW = (w / n).coerceAtLeast(4f)
-                        val barPillarW = (colW * 0.42f).coerceIn(4f, 14f)
+        AnimatedContent(
+            targetState = ui.hours to hotValues,
+            transitionSpec = {
+                (fadeIn(tween(260)) + scaleIn(initialScale = 0.95f)) togetherWith
+                    (fadeOut(tween(180)) + scaleOut(targetScale = 1.04f))
+            },
+            label = "chartCurveSwitch",
+        ) { (_, currentHotValues) ->
+            val curPeakV = currentHotValues.maxOrNull() ?: 0.0
+            val curPeakIdx = if (curPeakV > 0.0) currentHotValues.indexOf(curPeakV) else -1
+            val curN = currentHotValues.size.coerceAtLeast(1)
 
-                        val points = hotValues.mapIndexed { i, v ->
-                            val x = i * (w / (n - 1).toFloat())
-                            val y = h - padBot - ((v / peakV) * chartH).toFloat()
-                            Offset(x, y)
-                        }
-
-                        val linePath = Path().apply {
-                            moveTo(points[0].x, points[0].y)
-                            for (i in 0 until points.size - 1) {
-                                val p0 = points[i]
-                                val p1 = points[i + 1]
-                                val cx = (p0.x + p1.x) / 2f
-                                cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
-                            }
-                        }
-
-                        val fillPath = Path().apply {
-                            addPath(linePath)
-                            lineTo(w, h)
-                            lineTo(0f, h)
-                            close()
-                        }
-                        val fillBrush = Brush.verticalGradient(
-                            colors = listOf(tint.copy(alpha = 0.38f), tint.copy(alpha = 0.08f), Color.Transparent),
-                            startY = padTop,
-                            endY = h,
+            Spacer(
+                Modifier
+                    .fillMaxWidth()
+                    .height(78.dp)
+                    .pointerInput(curN) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { offset -> onBar(barAt(offset.x, size.width, curN)) },
+                            onHorizontalDrag = { change, _ ->
+                                change.consume()
+                                onBar(barAt(change.position.x, size.width, curN))
+                            },
                         )
-                        val strokeStyle = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-                        val glowStyle = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-                        val peakOuterRadius = 8.dp.toPx()
-                        val peakMidRadius = 4.dp.toPx()
-                        val peakInnerRadius = 2.dp.toPx()
-                        val selLineWidth = 1.5.dp.toPx()
-                        val selDashEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                    }
+                    .pointerInput(curN, ui.bar) {
+                        detectTapGestures { offset ->
+                            val tapped = barAt(offset.x, size.width, curN)
+                            onBar(if (ui.bar == tapped) -1 else tapped)
+                        }
+                    }
+                    .drawWithCache {
+                        if (curPeakV <= 0.0 || curN < 2) {
+                            onDrawBehind { }
+                        } else {
+                            val w = size.width
+                            val h = size.height
+                            val padTop = 10.dp.toPx()
+                            val padBot = 6.dp.toPx()
+                            val chartH = h - padTop - padBot
+                            val colW = (w / curN).coerceAtLeast(4f)
+                            val barPillarW = (colW * 0.42f).coerceIn(4f, 14f)
 
-                        onDrawBehind {
-                            // Subtle story submission volume pillars underneath
-                            if (peakNew > 0.0) {
-                                for (i in newValues.indices) {
-                                    val count = newValues[i]
-                                    if (count > 0.0) {
-                                        val barH = ((count / peakNew) * (chartH * 0.45f)).toFloat().coerceAtLeast(2f)
-                                        val centerX = if (n > 1) i * (w / (n - 1).toFloat()) else w / 2f
-                                        val isSel = ui.bar == i
-                                        drawRoundRect(
-                                            color = if (isSel) tint.copy(alpha = 0.30f) else colors.onSurfaceVariant.copy(alpha = 0.09f),
-                                            topLeft = Offset(centerX - barPillarW / 2f, h - padBot - barH),
-                                            size = Size(barPillarW, barH),
-                                            cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
-                                        )
-                                    }
+                            val points = currentHotValues.mapIndexed { i, v ->
+                                val x = i * (w / (curN - 1).toFloat())
+                                val y = h - padBot - ((v / curPeakV) * chartH).toFloat()
+                                Offset(x, y)
+                            }
+
+                            val linePath = Path().apply {
+                                moveTo(points[0].x, points[0].y)
+                                for (i in 0 until points.size - 1) {
+                                    val p0 = points[i]
+                                    val p1 = points[i + 1]
+                                    val cx = (p0.x + p1.x) / 2f
+                                    cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
                                 }
                             }
 
-                            drawPath(fillPath, brush = fillBrush)
-                            drawPath(linePath, color = tint.copy(alpha = 0.16f), style = glowStyle)
-                            drawPath(linePath, color = tint, style = strokeStyle)
-
-                            if (peakIdx in points.indices && peakIdx != ui.bar) {
-                                val peakPt = points[peakIdx]
-                                drawCircle(tint.copy(alpha = 0.25f), radius = peakOuterRadius, center = peakPt)
-                                drawCircle(colors.surface, radius = peakMidRadius, center = peakPt)
-                                drawCircle(tint, radius = peakInnerRadius, center = peakPt)
+                            val fillPath = Path().apply {
+                                addPath(linePath)
+                                lineTo(w, h)
+                                lineTo(0f, h)
+                                close()
                             }
+                            val fillBrush = Brush.verticalGradient(
+                                colors = listOf(tint.copy(alpha = 0.38f), tint.copy(alpha = 0.08f), Color.Transparent),
+                                startY = padTop,
+                                endY = h,
+                            )
+                            val strokeStyle = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                            val glowStyle = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                            val peakOuterRadius = 8.dp.toPx()
+                            val peakMidRadius = 4.dp.toPx()
+                            val peakInnerRadius = 2.dp.toPx()
+                            val selLineWidth = 1.5.dp.toPx()
+                            val selDashEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
 
-                            if (ui.bar in points.indices) {
-                                val selPt = points[ui.bar]
-                                drawLine(
-                                    color = tint.copy(alpha = 0.75f),
-                                    start = Offset(selPt.x, padTop),
-                                    end = Offset(selPt.x, h - padBot),
-                                    strokeWidth = selLineWidth,
-                                    pathEffect = selDashEffect,
-                                )
-                                drawCircle(tint.copy(alpha = 0.30f), radius = 9.dp.toPx(), center = selPt)
-                                drawCircle(colors.surface, radius = 5.dp.toPx(), center = selPt)
-                                drawCircle(tint, radius = 3.dp.toPx(), center = selPt)
+                            onDrawBehind {
+                                // Subtle story submission volume pillars underneath
+                                if (peakNew > 0.0) {
+                                    for (i in newValues.indices) {
+                                        val count = newValues[i]
+                                        if (count > 0.0) {
+                                            val barH = ((count / peakNew) * (chartH * 0.45f)).toFloat().coerceAtLeast(2f)
+                                            val centerX = if (curN > 1) i * (w / (curN - 1).toFloat()) else w / 2f
+                                            val isSel = ui.bar == i
+                                            drawRoundRect(
+                                                color = if (isSel) tint.copy(alpha = 0.30f) else colors.onSurfaceVariant.copy(alpha = 0.09f),
+                                                topLeft = Offset(centerX - barPillarW / 2f, h - padBot - barH),
+                                                size = Size(barPillarW, barH),
+                                                cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+                                            )
+                                        }
+                                    }
+                                }
+
+                                drawPath(fillPath, brush = fillBrush)
+                                drawPath(linePath, color = tint.copy(alpha = 0.16f), style = glowStyle)
+                                drawPath(linePath, color = tint, style = strokeStyle)
+
+                                if (curPeakIdx in points.indices && curPeakIdx != ui.bar) {
+                                    val peakPt = points[curPeakIdx]
+                                    drawCircle(tint.copy(alpha = 0.25f), radius = peakOuterRadius, center = peakPt)
+                                    drawCircle(colors.surface, radius = peakMidRadius, center = peakPt)
+                                    drawCircle(tint, radius = peakInnerRadius, center = peakPt)
+                                }
+
+                                if (ui.bar in points.indices) {
+                                    val selPt = points[ui.bar]
+                                    drawLine(
+                                        color = tint.copy(alpha = 0.75f),
+                                        start = Offset(selPt.x, padTop),
+                                        end = Offset(selPt.x, h - padBot),
+                                        strokeWidth = selLineWidth,
+                                        pathEffect = selDashEffect,
+                                    )
+                                    drawCircle(tint.copy(alpha = 0.30f), radius = 9.dp.toPx(), center = selPt)
+                                    drawCircle(colors.surface, radius = 5.dp.toPx(), center = selPt)
+                                    drawCircle(tint, radius = 3.dp.toPx(), center = selPt)
+                                }
                             }
                         }
                     }
-                }
-        )
+            )
+        }
 
         // Time axis markers
         Row(
@@ -1507,8 +1520,8 @@ private fun StoryCard(
             ) {
                 Row(verticalAlignment = Alignment.Top) {
                     Text(
-                        "${index + 1}",
-                        modifier = Modifier.width(26.dp).padding(top = 1.dp),
+                        "#${index + 1}",
+                        modifier = Modifier.width(34.dp).padding(top = 1.dp),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = accent,
@@ -1588,14 +1601,15 @@ private fun StoryCard(
                 ) {
                     Stat(
                         icon = if (hn) AppIcons.ArrowUp else Icons.Filled.Star,
-                        text = TrendingCore.fmtCompact(story.score),
+                        text = "${TrendingCore.fmtCompact(story.score)} ${if (hn) "pts" else "stars"}",
                         label = if (hn) "points" else "stars",
                         tint = accent,
                     )
                     if (hn) {
+                        val comments = story.extra.toInt()
                         Stat(
                             icon = AppIcons.Comment,
-                            text = if (story.extra > 0) TrendingCore.fmtCompact(story.extra) else "Discuss",
+                            text = if (comments > 0) "$comments ${if (comments == 1) "comment" else "comments"}" else "Discuss",
                             label = "comments",
                             tint = if (read) faded else colors.onSurfaceVariant,
                             onClick = { onOpen(story.talk, story.id) },

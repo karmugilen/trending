@@ -21,12 +21,19 @@ android {
         versionName = "1.5.0"
     }
 
+    val allAbis = project.hasProperty("allAbis")
+
     splits {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
-            isUniversalApk = true
+            if (allAbis) {
+                include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+                isUniversalApk = true
+            } else {
+                include("arm64-v8a")
+                isUniversalApk = false
+            }
         }
     }
 
@@ -98,12 +105,19 @@ data class RustTargetConfig(
     val clangPrefix: String,
 )
 
-val rustTargets = listOf(
-    RustTargetConfig("arm64-v8a", "aarch64-linux-android", "aarch64-linux-android26-clang"),
-    RustTargetConfig("armeabi-v7a", "armv7-linux-androideabi", "armv7a-linux-androideabi26-clang"),
-    RustTargetConfig("x86_64", "x86_64-linux-android", "x86_64-linux-android26-clang"),
-    RustTargetConfig("x86", "i686-linux-android", "i686-linux-android26-clang"),
-)
+val allAbis = project.hasProperty("allAbis")
+val rustTargets = if (allAbis) {
+    listOf(
+        RustTargetConfig("arm64-v8a", "aarch64-linux-android", "aarch64-linux-android26-clang"),
+        RustTargetConfig("armeabi-v7a", "armv7-linux-androideabi", "armv7a-linux-androideabi26-clang"),
+        RustTargetConfig("x86_64", "x86_64-linux-android", "x86_64-linux-android26-clang"),
+        RustTargetConfig("x86", "i686-linux-android", "i686-linux-android26-clang"),
+    )
+} else {
+    listOf(
+        RustTargetConfig("arm64-v8a", "aarch64-linux-android", "aarch64-linux-android26-clang")
+    )
+}
 
 val copyTasks = rustTargets.map { target ->
     val buildTask = tasks.register<Exec>("buildTrendingRust_${target.abi}") {
