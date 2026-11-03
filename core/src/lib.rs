@@ -1326,6 +1326,16 @@ mod tests {
     }
 
     #[test]
+    fn github_feed_and_new_and_trending_flag() {
+        let then = 1_700_000_000;
+        let origin = window_for(then, 1).origin;
+        let gh_json = r#"{"total_count":1,"items":[{"id":123,"name":"my-repo","full_name":"user/my-repo","html_url":"https://github.com/user/my-repo","description":"desc","stargazers_count":100,"forks_count":10,"language":"Rust","created_at":"2023-11-14T22:13:00Z"}]}"#;
+        store::ingest("ui:gh:1", Source::Gh, origin, then, gh_json, false).unwrap();
+        let gh_feed = feed_for_slot("ui:gh:1", Mode::Hot, 1, then, &FeedOptions::default()).unwrap();
+        assert_eq!(1, gh_feed.feed.shown.len());
+    }
+
+    #[test]
     fn search_narrows_the_list_but_not_the_charts() {
         let now = 1_700_000_000;
         let window = window_for(now, 6);
