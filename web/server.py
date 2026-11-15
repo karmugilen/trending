@@ -49,6 +49,9 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 SAVED_FILE = DATA_DIR / "saved.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 
+APP_VERSION = "1.5.2"  # keep in sync with app/build.gradle.kts versionName
+USER_AGENT = f"omalauncher-trending/{APP_VERSION}"
+
 SERVER_START_TIME = int(time.time())
 
 # Track GitHub API rate limits
@@ -66,7 +69,7 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
 ]
 
-app = FastAPI(title="Trending Web", version="1.5.0")
+app = FastAPI(title="Trending Web", version=APP_VERSION)
 
 
 @app.middleware("http")
@@ -222,7 +225,7 @@ async def fetch_hn_stories(origin: int, client: httpx.AsyncClient, before: Optio
         "https://hn.algolia.com/api/v1/search_by_date?"
         f"tags=story&hitsPerPage=1000&numericFilters={filters}"
     )
-    headers = {"User-Agent": "omalauncher-trending/1.2"}
+    headers = {"User-Agent": USER_AGENT}
     resp = None
     for attempt in range(3):
         try:
@@ -269,7 +272,7 @@ async def fetch_gh_repos(origin: int, token: Optional[str], client: httpx.AsyncC
     query = f"created:>{stamp}"
     url = f"https://api.github.com/search/repositories?q={query}&sort=stars&order=desc&per_page=100&page={page}"
     headers = {
-        "User-Agent": "omalauncher-trending/1.2",
+        "User-Agent": USER_AGENT,
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
@@ -778,7 +781,7 @@ async def get_status():
     # If rate limit hasn't been set yet, probe rate_limit endpoint
     if GH_RATE_LIMIT["updated"] == 0:
         headers = {
-            "User-Agent": "omalauncher-trending/1.2",
+            "User-Agent": USER_AGENT,
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
@@ -826,7 +829,7 @@ async def get_status():
             "reset": GH_RATE_LIMIT["reset"],
         },
         "uptime_sec": int(time.time() - SERVER_START_TIME),
-        "version": "1.4.0",
+        "version": APP_VERSION,
     }
 
 @app.get("/api/discussions")
@@ -838,7 +841,7 @@ async def get_discussions(id: str = Query(...), source: str = Query("hn")):
             raise HTTPException(status_code=400, detail="Invalid Hacker News item id")
         url = f"https://hn.algolia.com/api/v1/items/{id}"
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            resp = await client.get(url, headers={"User-Agent": "omalauncher-trending/1.2"})
+            resp = await client.get(url, headers={"User-Agent": USER_AGENT})
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail="Cannot fetch HN discussion")
             return resp.json()
