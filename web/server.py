@@ -17,9 +17,11 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import json
+import logging
 import math
 import os
 from pathlib import Path
+import threading
 import time
 from typing import Any, Dict, List, Optional, Set
 
@@ -35,8 +37,11 @@ try:
 except ImportError:
     from web import engine
 
+logger = logging.getLogger("trending.web")
+
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+# TRENDING_DATA_DIR lets tests (or a second instance) keep their own bookmarks/settings.
+DATA_DIR = Path(os.environ.get("TRENDING_DATA_DIR") or (BASE_DIR / "data"))
 STATIC_DIR = BASE_DIR / "static"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,15 +59,36 @@ GH_RATE_LIMIT: Dict[str, Any] = {
     "updated": 0,
 }
 
+ALLOWED_ORIGINS = [
+    "http://127.0.0.1:8080",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://localhost:3000",
+]
+
 app = FastAPI(title="Trending Web", version="1.5.0")
+
+
+@app.middleware("http")
+async def block_cross_site_writes(request: Request, call_next):
+    """Reject state-changing requests sent by other websites (CSRF).
+
+    CORS only stops other sites from *reading* responses; a page on any site can
+    still POST a form (e.g. a multipart bookmark import) to 127.0.0.1. Browsers
+    always send Origin on cross-origin POST/PUT/DELETE, so refuse unknown ones.
+    Requests without Origin (curl, scripts, tests) are allowed.
+    """
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        origin = request.headers.get("origin")
+        fetch_site = request.headers.get("sec-fetch-site")
+        if (origin and origin not in ALLOWED_ORIGINS) or fetch_site == "cross-site":
+            return JSONResponse({"detail": "Cross-site request blocked"}, status_code=403)
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:8080",
-        "http://localhost:8080",
-        "http://127.0.0.1:3000",
-        "http://localhost:3000",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -71,6 +97,18 @@ app.add_middleware(
 # Shared in-memory cache for API downloads
 CACHE: Dict[str, Dict[str, Any]] = {}
 CACHE_LOCK = asyncio.Lock()
+CACHE_FRESH_SEC = 90
+# Keys include the moving window start, so old keys are never read again; drop them.
+CACHE_MAX_AGE_SEC = 15 * 60
+
+
+def prune_cache(now_sec: int) -> None:
+    """Drop cache entries that are too old to be served. Call with CACHE_LOCK held."""
+    for key in [k for k, v in CACHE.items() if now_sec - v.get("fetched", 0) > CACHE_MAX_AGE_SEC]:
+        del CACHE[key]
+
+# Serialises reads/writes of the JSON files (sync endpoints run in a thread pool).
+FILE_LOCK = threading.RLock()
 
 HTTP_TIMEOUT = httpx.Timeout(30.0, connect=20.0)
 
@@ -87,32 +125,53 @@ DEFAULT_SETTINGS = {
     "githubToken": "",
 }
 
-def load_settings() -> Dict[str, Any]:
-    if SETTINGS_FILE.is_file():
+def _write_json_atomic(path: Path, data: Any) -> None:
+    """Write to a temp file and rename, so a crash never leaves half a file."""
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def _read_json(path: Path, expected: type) -> Optional[Any]:
+    """Read JSON; on a corrupt file keep a backup copy instead of letting it be overwritten."""
+    if not path.is_file():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, expected):
+            return data
+        raise ValueError(f"expected {expected.__name__}, got {type(data).__name__}")
+    except Exception as e:
+        backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
         try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return {**DEFAULT_SETTINGS, **data}
-        except Exception:
-            pass
-    return dict(DEFAULT_SETTINGS)
+            os.replace(path, backup)
+            logger.warning("Unreadable %s (%s); moved it to %s", path.name, e, backup.name)
+        except OSError:
+            logger.warning("Unreadable %s (%s); could not back it up", path.name, e)
+        return None
+
+
+def load_settings() -> Dict[str, Any]:
+    with FILE_LOCK:
+        data = _read_json(SETTINGS_FILE, dict)
+    return {**DEFAULT_SETTINGS, **data} if data else dict(DEFAULT_SETTINGS)
 
 def save_settings(settings: Dict[str, Any]) -> None:
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=2)
+    with FILE_LOCK:
+        _write_json_atomic(SETTINGS_FILE, settings)
 
 def load_saved() -> List[Dict[str, Any]]:
-    if SAVED_FILE.is_file():
-        try:
-            with open(SAVED_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return []
+    with FILE_LOCK:
+        data = _read_json(SAVED_FILE, list)
+    return [i for i in data if isinstance(i, dict)] if data else []
 
 def save_saved(items: List[Dict[str, Any]]) -> None:
-    with open(SAVED_FILE, "w", encoding="utf-8") as f:
-        json.dump(items, f, indent=2)
+    with FILE_LOCK:
+        _write_json_atomic(SAVED_FILE, items)
 
 def update_gh_rate_limit(headers: httpx.Headers) -> None:
     global GH_RATE_LIMIT
@@ -278,16 +337,18 @@ def get_settings():
 
 @app.post("/api/settings")
 def update_settings(update: SettingsUpdate):
-    curr = load_settings()
     data = update.model_dump(exclude_unset=True)
     if "githubToken" in data:
         token_val = data["githubToken"]
-        if token_val == "••••••••" or token_val is None:
+        # "••••••••" is the mask the UI sends back, not a secret.
+        if token_val == "••••••••" or token_val is None:  # noqa: S105  # nosec B105
             del data["githubToken"]
-    for k, v in data.items():
-        if v is not None:
-            curr[k] = v
-    save_settings(curr)
+    with FILE_LOCK:
+        curr = load_settings()
+        for k, v in data.items():
+            if v is not None:
+                curr[k] = v
+        save_settings(curr)
     return sanitize_settings_for_client(curr)
 
 @app.get("/api/saved")
@@ -320,14 +381,14 @@ async def import_saved(request: Request):
             try:
                 incoming_data = json.loads(file_bytes.decode("utf-8"))
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid JSON file: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Invalid JSON file: {str(e)}") from e
         else:
             raise HTTPException(status_code=400, detail="No file found in multipart upload")
     else:
         try:
             incoming_data = await request.json()
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {str(e)}") from e
 
     if isinstance(incoming_data, dict):
         if "items" in incoming_data and isinstance(incoming_data["items"], list):
@@ -345,6 +406,11 @@ async def import_saved(request: Request):
     else:
         raise HTTPException(status_code=400, detail="Expected a JSON list of saved stories")
 
+    with FILE_LOCK:
+        return _merge_imported(incoming_items)
+
+
+def _merge_imported(incoming_items: List[Any]) -> Dict[str, Any]:
     items = load_saved()
     existing_ids = {str(s.get("story", {}).get("id") or s.get("id") or "") for s in items if isinstance(s, dict)}
     added = 0
@@ -374,23 +440,24 @@ async def import_saved(request: Request):
 @app.post("/api/saved/toggle")
 def toggle_saved(req: ToggleSavedRequest):
     story = req.story
-    items = load_saved()
-    existing = next((i for i, item in enumerate(items) if item.get("story", {}).get("id") == story.get("id")), None)
-    now = int(time.time())
-    if existing is not None:
-        items.pop(existing)
-        save_saved(items)
-        return {"saved": False, "items": items}
-    else:
+    with FILE_LOCK:
+        items = load_saved()
+        existing = next((i for i, item in enumerate(items) if item.get("story", {}).get("id") == story.get("id")), None)
+        now = int(time.time())
+        if existing is not None:
+            items.pop(existing)
+            save_saved(items)
+            return {"saved": False, "items": items}
         items.insert(0, {"story": story, "savedAt": now})
         save_saved(items)
         return {"saved": True, "items": items}
 
 @app.delete("/api/saved/{story_id}")
 def delete_saved(story_id: str):
-    items = load_saved()
-    items = [item for item in items if item.get("story", {}).get("id") != story_id]
-    save_saved(items)
+    with FILE_LOCK:
+        items = load_saved()
+        items = [item for item in items if item.get("story", {}).get("id") != story_id]
+        save_saved(items)
     return {"ok": True, "items": items}
 
 @app.get("/api/feed")
@@ -423,16 +490,25 @@ async def get_feed(
 
     async with CACHE_LOCK:
         cached = CACHE.get(cache_key)
-        if not force_refresh and cached and (now_sec - cached["fetched"] < 90):
+        if not force_refresh and cached and (now_sec - cached["fetched"] < CACHE_FRESH_SEC):
             stories = cached["stories"]
 
     if not stories:
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            if source == "hn":
-                stories = await fetch_hn_stories(origin, client, before=before)
-            else:
-                stories = await fetch_gh_repos(origin, github_token, client, page=page)
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                if source == "hn":
+                    stories = await fetch_hn_stories(origin, client, before=before)
+                else:
+                    stories = await fetch_gh_repos(origin, github_token, client, page=page)
+        except httpx.HTTPError as e:
+            name = "Hacker News" if source == "hn" else "GitHub"
+            logger.warning("Fetching %s failed: %s", name, e)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not reach {name}. Check your connection and try again.",
+            ) from e
         async with CACHE_LOCK:
+            prune_cache(now_sec)
             CACHE[cache_key] = {"stories": stories, "fetched": now_sec}
 
     oldest_t = min((s["t"] for s in stories if s.get("t", 0) > 0), default=0)
@@ -515,9 +591,9 @@ async def get_feed(
     lang_counts: Dict[str, int] = {}
     if source == "gh":
         for item in inside_window:
-            l = item.get("meta") or ""
-            if l:
-                lang_counts[l] = lang_counts.get(l, 0) + 1
+            lang_name = item.get("meta") or ""
+            if lang_name:
+                lang_counts[lang_name] = lang_counts.get(lang_name, 0) + 1
     langs_list = [{"name": k, "count": v} for k, v in sorted(lang_counts.items(), key=lambda x: x[1], reverse=True)[:8]]
 
     # Filtering
@@ -648,7 +724,7 @@ async def get_alerts(
 
         async with CACHE_LOCK:
             cached = CACHE.get(cache_key)
-            if not force_refresh and cached and (now_sec - cached["fetched"] < 90):
+            if not force_refresh and cached and (now_sec - cached["fetched"] < CACHE_FRESH_SEC):
                 stories = cached["stories"]
 
         if not stories:
@@ -659,8 +735,10 @@ async def get_alerts(
                     else:
                         stories = await fetch_gh_repos(origin, github_token, client)
                 async with CACHE_LOCK:
+                    prune_cache(now_sec)
                     CACHE[cache_key] = {"stories": stories, "fetched": now_sec}
-            except Exception:
+            except Exception as e:
+                logger.warning("Alert scan skipped %s: %s", src, e)
                 continue
 
         for story in stories:
@@ -722,8 +800,8 @@ async def get_status():
                         GH_RATE_LIMIT["updated"] = int(time.time())
                 else:
                     update_gh_rate_limit(resp.headers)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("GitHub rate-limit probe failed: %s", e)
 
     async with CACHE_LOCK:
         cache_count = len(CACHE)
@@ -755,6 +833,9 @@ async def get_status():
 async def get_discussions(id: str = Query(...), source: str = Query("hn")):
     """Fetch comments/discussion tree for an item."""
     if source == "hn":
+        # Only numeric HN item ids; anything else could rewrite the Algolia URL path.
+        if not id.isdigit():
+            raise HTTPException(status_code=400, detail="Invalid Hacker News item id")
         url = f"https://hn.algolia.com/api/v1/items/{id}"
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
             resp = await client.get(url, headers={"User-Agent": "omalauncher-trending/1.2"})
@@ -762,8 +843,10 @@ async def get_discussions(id: str = Query(...), source: str = Query("hn")):
                 raise HTTPException(status_code=resp.status_code, detail="Cannot fetch HN discussion")
             return resp.json()
     else:
-        # GitHub item
-        return {"text": f"GitHub discussions available at https://github.com/{id}"}
+        # GitHub item: story ids are numeric repo ids, so only build a link for owner/repo.
+        if "/" in id:
+            return {"text": f"GitHub discussions available at https://github.com/{id}"}
+        return {"text": "GitHub discussions are available on the repository page."}
 
 # Serve frontend static files
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -774,4 +857,5 @@ def serve_index():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8080, reload=True)
+    # Localhost only: the server has no authentication.
+    uvicorn.run("server:app", host="127.0.0.1", port=8080, reload=True)
