@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.Executors
 
 /** A story the user kept, with when they kept it. */
 data class Saved(val story: Story, val savedAt: Long)
@@ -19,6 +20,8 @@ data class Saved(val story: Story, val savedAt: Long)
  */
 class SavedStore private constructor(context: Context) {
     private val file = File(context.applicationContext.filesDir, "saved.json")
+    /** Writes happen off the UI thread, one at a time and in order, so the newest list wins. */
+    private val writer = Executors.newSingleThreadExecutor()
     private val state = MutableStateFlow(read())
 
     /** Newest first. */
@@ -37,7 +40,7 @@ class SavedStore private constructor(context: Context) {
                 current.filterNot { it.story.id == story.id }
             }
             state.value = next
-            write(next)
+            writer.execute { write(next) }
             return saved
         }
     }
@@ -45,7 +48,7 @@ class SavedStore private constructor(context: Context) {
     fun restore(items: List<Saved>) {
         synchronized(this) {
             state.value = items
-            write(items)
+            writer.execute { write(items) }
         }
     }
 

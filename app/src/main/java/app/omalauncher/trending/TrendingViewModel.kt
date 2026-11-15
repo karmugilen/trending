@@ -1,6 +1,7 @@
 package app.omalauncher.trending
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.omalauncher.trending.core.FeedOptions
@@ -105,7 +106,11 @@ class TrendingViewModel(app: Application) : AndroidViewModel(app) {
                     sensitivity = s.sensitivity,
                 )
                 _briefing.value = result
-            } catch (_: Exception) {}
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("TrendingViewModel", "could not build the briefing", e)
+            }
         }
     }
 
