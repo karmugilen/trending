@@ -1,11 +1,13 @@
-Trending 1.4.0
+Trending
 Package: app.omalauncher.trending
-versionCode 5, versionName 1.4.0, arm64-v8a
-Installable APK in this folder: Trending-1.4.0.apk
-Signed with v2 using debug.keystore (also in this folder), so it updates older versions in place.
-Store password: android
-Key alias: androiddebugkey
-Key password: android
+
+Signing
+- Release builds are signed only with your own release key, read from env vars
+  (TRENDING_KEYSTORE, TRENDING_STORE_PASSWORD, TRENDING_KEY_ALIAS, TRENDING_KEY_PASSWORD)
+  or from keystore.properties in the repo root (gitignored; see keystore.properties.example).
+- Without a key, ./gradlew :app:assembleRelease produces an unsigned APK.
+- debug.keystore in this repo is a public debug key. It signs debug builds only and must
+  never sign a release. Never commit a release keystore or its passwords.
 
 The feed logic is Rust in core/: parsing, the per-slot row cache, charts, ranking,
 rising/security/spam/interest signals, alert decisions, and the API URLs.
@@ -21,4 +23,5 @@ Rebuild needs JDK 17+, Android SDK, Android NDK, and Rust with the aarch64-linux
 3. On the phone, if aapt2 from Maven does not run, put this in ~/.gradle/gradle.properties:
    android.aapt2FromMavenOverride=/root/Android/Sdk/build-tools/37.0.0/aapt2
 4. ./gradlew :app:assembleRelease
-   The release APK is app/build/outputs/apk/release/app-release.apk
+   The release APKs are in app/build/outputs/apk/release/ (…-release.apk when signed,
+   …-release-unsigned.apk when no release key is configured).

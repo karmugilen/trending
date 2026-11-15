@@ -126,6 +126,13 @@ Create a `local.properties` file in the repository root pointing to your Android
 sdk.dir=/path/to/your/Android/Sdk
 ```
 
+### Release Signing
+
+Release APKs are signed only with your own key. Provide it with env vars
+(`TRENDING_KEYSTORE`, `TRENDING_STORE_PASSWORD`, `TRENDING_KEY_ALIAS`, `TRENDING_KEY_PASSWORD`)
+or a gitignored `keystore.properties` (copy `keystore.properties.example`).
+Without a key, `assembleRelease` produces an unsigned APK. The `debug.keystore` in this repo is public and only signs debug builds.
+
 ### Fast Development Build
 
 For rapid iterative testing on a connected device:
