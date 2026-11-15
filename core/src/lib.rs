@@ -986,6 +986,10 @@ fn json_i64(value: Option<&Value>) -> Option<i64> {
 }
 
 fn parse_github_time(text: &str) -> i64 {
+    // Byte slicing below needs ASCII; a stray multibyte char would panic (and abort the app).
+    if !text.is_ascii() {
+        return 0;
+    }
     let bytes = text.as_bytes();
     if bytes.len() < 20 || bytes[4] != b'-' || bytes[7] != b'-' || bytes[10] != b'T' || bytes[13] != b':' || bytes[16] != b':' {
         return 0;
@@ -1163,6 +1167,13 @@ mod tests {
         let merged = merge_stories(&[a, b], &[again, c]);
         assert_eq!(vec!["hn:1", "hn:2", "hn:3"], merged.iter().map(|s| s.id.as_str()).collect::<Vec<_>>());
         assert_eq!(1.0, merged[0].score);
+    }
+
+    #[test]
+    fn github_time_ignores_non_ascii_instead_of_panicking() {
+        assert_eq!(0, parse_github_time("2024-01-01T00:00:0\u{e9}"));
+        assert_eq!(0, parse_github_time("2024-01-01T00:00:00\u{e9}"));
+        assert_eq!(0, parse_github_time("\u{e9}024-01-01T00:00:00Z"));
     }
 
     #[test]
