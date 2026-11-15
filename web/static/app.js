@@ -552,7 +552,9 @@ function showToast(message, type = "info", duration = 2800) {
   if (!container) return;
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
-  toast.innerHTML = `<span>${message}</span>`;
+  const span = document.createElement("span");
+  span.textContent = message; // messages can include server error text; never parse as HTML
+  toast.appendChild(span);
   container.appendChild(toast);
 
   setTimeout(() => {
@@ -574,15 +576,18 @@ async function openDiscussions(id, title, author = "") {
   modal.classList.add("open");
 
   try {
-    const res = await fetch(`/api/discussions?id=${id}&source=${state.source}`);
+    const res = await fetch(`/api/discussions?id=${encodeURIComponent(id)}&source=${encodeURIComponent(state.source)}`);
     if (!res.ok) throw new Error("Could not load comments");
     const data = await res.json();
 
     if (state.source === "gh") {
+      // GitHub story ids are numeric repo ids; the title is "owner/repo".
+      const repoPath = /^[\w.-]+\/[\w.-]+$/.test(title || "") ? title : "";
+      const repoUrl = repoPath ? `https://github.com/${repoPath}` : "https://github.com";
       bodyEl.innerHTML = `
         <div style="padding: 16px;">
           <p style="color: var(--text-muted); margin-bottom: 16px;">GitHub repository discussions and issues are hosted directly on GitHub.</p>
-          <a href="https://github.com/${id}" target="_blank" rel="noopener noreferrer" class="show-more-btn" style="text-decoration: none;">
+          <a href="${escapeAttr(repoUrl)}" target="_blank" rel="noopener noreferrer" class="show-more-btn" style="text-decoration: none;">
             Open on GitHub &rarr;
           </a>
         </div>
@@ -658,26 +663,37 @@ function toggleCommentCollapse(btn) {
 
 function sanitizeCommentHtml(rawHtml) {
   if (!rawHtml) return "";
+  // Allowlist: keep only the tags HN comments use; unwrap anything else to its text.
+  const allowedTags = new Set(["P", "A", "I", "EM", "B", "STRONG", "CODE", "PRE", "BR", "UL", "OL", "LI", "BLOCKQUOTE"]);
   const doc = new DOMParser().parseFromString(rawHtml, "text/html");
-  const blockedTags = ["script", "style", "iframe", "object", "embed", "form", "input", "textarea"];
-  blockedTags.forEach(t => doc.querySelectorAll(t).forEach(el => el.remove()));
 
-  doc.querySelectorAll("*").forEach(el => {
-    for (let i = el.attributes.length - 1; i >= 0; i--) {
-      const attr = el.attributes[i].name;
-      if (attr.startsWith("on") || attr === "style") {
-        el.removeAttribute(attr);
+  const clean = (node) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        if (!allowedTags.has(child.tagName)) {
+          const dropWhole = ["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "TEMPLATE", "SVG", "MATH"].includes(child.tagName.toUpperCase());
+          if (dropWhole) {
+            child.remove();
+          } else {
+            clean(child);
+            child.replaceWith(...Array.from(child.childNodes));
+          }
+          continue;
+        }
+        const href = child.tagName === "A" ? (child.getAttribute("href") || "") : "";
+        for (const attr of Array.from(child.attributes)) child.removeAttribute(attr.name);
+        if (child.tagName === "A") {
+          if (/^(https?:|mailto:)/i.test(href)) child.setAttribute("href", href);
+          child.setAttribute("target", "_blank");
+          child.setAttribute("rel", "noopener noreferrer");
+        }
+        clean(child);
+      } else if (child.nodeType !== Node.TEXT_NODE) {
+        child.remove(); // comments, processing instructions
       }
     }
-    if (el.tagName === "A") {
-      el.setAttribute("target", "_blank");
-      el.setAttribute("rel", "noopener noreferrer");
-      const href = el.getAttribute("href") || "";
-      if (!href.startsWith("http://") && !href.startsWith("https://") && !href.startsWith("mailto:")) {
-        el.removeAttribute("href");
-      }
-    }
-  });
+  };
+  clean(doc.body);
   return doc.body.innerHTML;
 }
 
