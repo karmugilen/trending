@@ -30,3 +30,6 @@ web/data/settings.json
 .DS_Store
 Thumbs.db
 *~
+
+# Local Python virtualenv
+.venv/

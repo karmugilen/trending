@@ -130,7 +130,11 @@ assert 'onclick=\"openDiscussions' not in content, 'Dangerous inline onclick str
 success_mark "web/static/app.js secured with event delegation and safe URL validation"
 
 info_mark "Running full Web integration test suite..."
-zsh -ic "actenv && cd web && python test_backend.py" || fail_mark "Web test_backend.py failed"
+VENV="${TRENDING_VENV:-$ROOT_DIR/.venv}"
+if [ ! -x "$VENV/bin/python" ]; then
+    python3 -m venv "$VENV" && "$VENV/bin/pip" install -q -r web/requirements-dev.txt
+fi
+(cd web && "$VENV/bin/python" -m pytest -q test_backend.py) || fail_mark "Web test_backend.py failed"
 success_mark "All backend and frontend web integration tests passed!"
 
 # ------------------------------------------------------------------------------

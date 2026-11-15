@@ -153,11 +153,18 @@ Compiled APKs will be located in `app/build/outputs/apk/release/`.
 
 ## Desktop Viewer
 
-To run the local desktop viewer:
+To run the local desktop viewer (needs Python 3.10+):
 ```bash
-./run_web.sh
+./run_web.sh   # creates .venv and installs web/requirements.txt on first run
 ```
 Then navigate to `http://127.0.0.1:8080` in your browser.
+
+To run the web tests:
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r web/requirements-dev.txt
+cd web && ../.venv/bin/python -m pytest -q
+```
+Tests use a temporary data folder, so your saved bookmarks and settings are not touched.
 
 ---
 
