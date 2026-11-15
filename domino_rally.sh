@@ -20,6 +20,9 @@ RESET="\033[0m"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
+# Read the version from Gradle so this script never goes stale.
+VERSION="$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -n1)"
+VERSION_CODE="$(sed -n 's/^ *versionCode = \([0-9]*\)/\1/p' app/build.gradle.kts | head -n1)"
 
 banner() {
     clear 2>/dev/null || true
@@ -34,7 +37,7 @@ banner() {
        DOMINO RALLY: AUTOMATED EVOLUTION PIPELINE
 EOF
     echo -e "${RESET}"
-    echo -e "${DIM}Chaining stages like falling dominoes to build release Trending 1.5.0${RESET}\n"
+    echo -e "${DIM}Chaining stages like falling dominoes to build release Trending ${VERSION}${RESET}\n"
 }
 
 step_header() {
@@ -152,13 +155,12 @@ success_mark "47/47 Rust core tests passed! (Snapshots, Velocity, Stack Profile 
 step_header "4" "🁥" "Android App & Native JNI Compilation"
 
 info_mark "Building optimized native shared library for aarch64-linux-android..."
-./gradlew :app:buildTrendingRust :app:copyTrendingRust || fail_mark "Rust native library build failed"
+./gradlew :app:copyTrendingRust || fail_mark "Rust native library build failed"
 success_mark "Native libtrending.so compiled and bundled"
 
-info_mark "Verifying Android version bump (v1.5.0)..."
-grep -q 'versionName = "1.5.0"' "$ROOT_DIR/app/build.gradle.kts" || fail_mark "versionName is not 1.5.0 in app/build.gradle.kts"
-grep -q 'versionCode = 6' "$ROOT_DIR/app/build.gradle.kts" || fail_mark "versionCode is not 6 in app/build.gradle.kts"
-success_mark "App version set to 1.5.0 (versionCode 6)"
+info_mark "Verifying Android version (v${VERSION})..."
+grep -q "^version = \"${VERSION}\"" "$ROOT_DIR/core/Cargo.toml" || fail_mark "core/Cargo.toml version does not match ${VERSION}"
+success_mark "App version ${VERSION} (versionCode ${VERSION_CODE})"
 
 # ------------------------------------------------------------------------------
 # Domino Stage 5: Release Build Assembly & R8 Shrinking
@@ -174,8 +176,10 @@ success_mark "Release build completed successfully"
 # ------------------------------------------------------------------------------
 step_header "6" "🁧" "Release APK Packaging & Verification Gate"
 
-RELEASE_APK="$ROOT_DIR/app/build/outputs/apk/release/app-release.apk"
-TARGET_APK="$ROOT_DIR/Trending-1.5.0.apk"
+# ABI splits name the APK app-<abi>-release.apk (or ...-release-unsigned.apk with no release key).
+RELEASE_APK="$(ls "$ROOT_DIR"/app/build/outputs/apk/release/app-*-release.apk 2>/dev/null | head -n1 || true)"
+[ -n "$RELEASE_APK" ] || fail_mark "No signed release APK. Configure a release key (see BUILD.txt)."
+TARGET_APK="$ROOT_DIR/Trending-${VERSION}.apk"
 
 if [ -f "$RELEASE_APK" ]; then
     cp "$RELEASE_APK" "$TARGET_APK"
@@ -198,15 +202,15 @@ fi
 # Domino Rally Completion Summary
 # ------------------------------------------------------------------------------
 echo -e "\n${BOLD}${GREEN}==============================================================================${RESET}"
-echo -e "${BOLD}${GREEN}🎉 ALL DOMINOES FELL FLAWLESSLY! Trending 1.5.0 IS READY TO INSTALL! 🎉${RESET}"
+echo -e "${BOLD}${GREEN}🎉 ALL DOMINOES FELL FLAWLESSLY! Trending ${VERSION} IS READY TO INSTALL! 🎉${RESET}"
 echo -e "${BOLD}${GREEN}==============================================================================${RESET}"
 
 echo -e "\n${BOLD}Package Details:${RESET}"
 echo -e "  • ${BOLD}APK Path:${RESET}       ${CYAN}$TARGET_APK${RESET}"
-echo -e "  • ${BOLD}Version:${RESET}        1.5.0 (versionCode 6)"
+echo -e "  • ${BOLD}Version:${RESET}        ${VERSION} (versionCode ${VERSION_CODE})"
 echo -e "  • ${BOLD}Package ID:${RESET}     app.omalauncher.trending"
 echo -e "  • ${BOLD}Size:${RESET}           $APK_SIZE"
-echo -e "  • ${BOLD}Signature:${RESET}      v2 signed (compatible with existing installs)"
+echo -e "  • ${BOLD}Signature:${RESET}      v2 signed with your release key"
 
 echo -e "\n${BOLD}Implemented Innovations from IDEA.md:${RESET}"
 echo -e "  • ${GREEN}✓${RESET} ${BOLD}Web Security & Parity:${RESET} Localhost binding, token exfiltration fix, XSS prevention, Search API rate info"
@@ -216,5 +220,5 @@ echo -e "  • ${GREEN}✓${RESET} ${BOLD}Stack Dependency Matching:${RESET} Zer
 echo -e "  • ${GREEN}✓${RESET} ${BOLD}Cross-Source Correlation:${RESET} Real-time detection of projects moving on Hacker News and GitHub simultaneously"
 
 echo -e "\n${BOLD}To Install on your Phone:${RESET}"
-echo -e "  ${YELLOW}adb install -r Trending-1.5.0.apk${RESET}"
-echo -e "  ${DIM}Or transfer Trending-1.5.0.apk to your device storage.${RESET}\n"
+echo -e "  ${YELLOW}adb install -r Trending-${VERSION}.apk${RESET}"
+echo -e "  ${DIM}Or transfer Trending-${VERSION}.apk to your device storage.${RESET}\n"
