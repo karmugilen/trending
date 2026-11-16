@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Trending</string>
+    <string name="breakout_widget_title">Breakouts</string>
+    <string name="breakout_widget_description">Top breakout stories and repos from Trending</string>
+    <string name="breakout_widget_empty">No breakouts yet — open the app to refresh</string>
 </resources>

@@ -181,7 +181,11 @@ import app.omalauncher.trending.logic.Flags
 import app.omalauncher.trending.logic.Lang
 import app.omalauncher.trending.logic.Mode
 import app.omalauncher.trending.logic.Source
+import app.omalauncher.trending.logic.SpikesSource
+import app.omalauncher.trending.logic.SpikesView
+import app.omalauncher.trending.logic.SpikesWordTrend
 import app.omalauncher.trending.logic.Story
+import app.omalauncher.trending.logic.Topic
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -214,6 +218,21 @@ class TrendingActions(
     val onClearNarrowing: () -> Unit,
     val onRadar: () -> Unit,
     val onGhOfficial: (Boolean) -> Unit = {},
+    /** Switch Hacker News / Trending / New Repos in one step, keeping each tab's selections. */
+    val onFeedTab: (Source, Boolean) -> Unit = { source, official ->
+        onSource(source)
+        if (source == Source.GH) onGhOfficial(official)
+    },
+    /** Open the merged Recent High Spikes tab. */
+    val onSpikes: () -> Unit = {},
+    /** Spikes tab: stories vs trending words. */
+    val onSpikesView: (SpikesView) -> Unit = {},
+    /** Pick a trending word: filter spikes stories by it. */
+    val onSpikesWord: (String) -> Unit = {},
+    /** Spikes: created-within window (6 / 12 / 24 hours). */
+    val onSpikesCreatedWithin: (Int) -> Unit = {},
+    /** Spikes: All / HN / Trending / New. */
+    val onSpikesSource: (SpikesSource) -> Unit = {},
     /** Returns true when the story is now saved. */
     val onToggleSaved: (Story) -> Boolean,
     val onSaved: () -> Unit,
@@ -321,7 +340,7 @@ fun TrendingScreen(
     }
 
     // A new source, list or window starts at the top of its list.
-    LaunchedEffect(ui.source, ui.mode, ui.hours) {
+    LaunchedEffect(ui.source, ui.mode, ui.hours, ui.spikes, ui.spikesView) {
         if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(0)
     }
 
@@ -412,7 +431,8 @@ private fun NarrowLayout(header: HeaderContent, list: ListContent, listState: La
                         )
                     }
                 }
-                if (ui.source == Source.GH) {
+                // Language breakdown only on GitHub Trending / New Repos — not HN or Spikes.
+                if (!ui.spikes && ui.source == Source.GH && ui.feed?.langs?.isNotEmpty() == true) {
                     item(key = "chart") {
                         ChartCard(
                             ui = ui,
@@ -425,8 +445,12 @@ private fun NarrowLayout(header: HeaderContent, list: ListContent, listState: La
                         )
                     }
                 }
-                item(key = "topics") { TopicsCard(header, Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp)) }
-                storyList(list, Modifier.padding(horizontal = 16.dp))
+                if (ui.spikes && ui.spikesView == SpikesView.WORDS) {
+                    spikesWordsList(list, Modifier.padding(horizontal = 16.dp))
+                } else {
+                    item(key = "topics") { TopicsCard(header, Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp)) }
+                    storyList(list, Modifier.padding(horizontal = 16.dp))
+                }
             }
         }
     }
@@ -450,7 +474,7 @@ private fun WideLayout(header: HeaderContent, list: ListContent, listState: Lazy
         ) {
             item(key = "top") { TopBar(header) }
             item(key = "controls") { Controls(header, Modifier.padding(horizontal = 16.dp)) }
-            if (ui.source == Source.GH) {
+            if (!ui.spikes && ui.source == Source.GH && ui.feed?.langs?.isNotEmpty() == true) {
                 item(key = "chart") {
                     // There is room beside the list, so the full charts always show.
                     ChartCard(
@@ -464,7 +488,9 @@ private fun WideLayout(header: HeaderContent, list: ListContent, listState: Lazy
                     )
                 }
             }
-            item(key = "topics") { TopicsCard(header, Modifier.padding(horizontal = 16.dp)) }
+            if (!(ui.spikes && ui.spikesView == SpikesView.WORDS)) {
+                item(key = "topics") { TopicsCard(header, Modifier.padding(horizontal = 16.dp)) }
+            }
         }
         VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Column(Modifier.weight(1f)) {
@@ -479,7 +505,11 @@ private fun WideLayout(header: HeaderContent, list: ListContent, listState: Lazy
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(top = 8.dp, bottom = bottom + 88.dp),
                 ) {
-                    storyList(list, Modifier.padding(horizontal = 16.dp))
+                    if (ui.spikes && ui.spikesView == SpikesView.WORDS) {
+                        spikesWordsList(list, Modifier.padding(horizontal = 16.dp))
+                    } else {
+                        storyList(list, Modifier.padding(horizontal = 16.dp))
+                    }
                 }
             }
         }
@@ -610,8 +640,9 @@ private fun SearchBar(query: String, onQuery: (String) -> Unit, onClose: () -> U
 private fun Controls(header: HeaderContent, modifier: Modifier = Modifier) {
     val ui = header.ui
     val colors = MaterialTheme.colorScheme
-    val isOfficial = ui.source == Source.GH && ui.ghOfficial
-    val isGhNew = ui.source == Source.GH && !ui.ghOfficial
+    val isOfficial = !ui.spikes && ui.source == Source.GH && ui.ghOfficial
+    val isGhNew = !ui.spikes && ui.source == Source.GH && !ui.ghOfficial
+    val isHn = !ui.spikes && ui.source == Source.HN
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -623,22 +654,24 @@ private fun Controls(header: HeaderContent, modifier: Modifier = Modifier) {
             Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // Row 1: Primary Feed Selector (3 streamlined tabs)
+            // Row 1: Primary Feed Selector (4 tabs including Spikes)
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 val tabs = listOf(
-                    Triple("Hacker News", ui.source == Source.HN) {
+                    Triple("HN", isHn) {
                         header.buzz()
-                        header.actions.onSource(Source.HN)
+                        header.actions.onFeedTab(Source.HN, false)
                     },
                     Triple("Trending", isOfficial) {
                         header.buzz()
-                        if (ui.source != Source.GH) header.actions.onSource(Source.GH)
-                        header.actions.onGhOfficial(true)
+                        header.actions.onFeedTab(Source.GH, true)
                     },
-                    Triple("New Repos", isGhNew) {
+                    Triple("New", isGhNew) {
                         header.buzz()
-                        if (ui.source != Source.GH) header.actions.onSource(Source.GH)
-                        header.actions.onGhOfficial(false)
+                        header.actions.onFeedTab(Source.GH, false)
+                    },
+                    Triple("Spikes", ui.spikes) {
+                        header.buzz()
+                        header.actions.onSpikes()
                     },
                 )
                 tabs.forEachIndexed { i, (label, selected, onClick) ->
@@ -654,10 +687,10 @@ private fun Controls(header: HeaderContent, modifier: Modifier = Modifier) {
             }
 
             // Row 2: Minimalist horizontal strip for Time, Mode, and Filters
-            val periods = if (isOfficial) {
-                listOf(1 to "Today", 6 to "This Week", 24 to "This Month")
-            } else {
-                listOf(1 to "1h", 6 to "6h", 12 to "12h", 24 to "24h")
+            val periods = when {
+                ui.spikes -> listOf(6 to "≤6h", 12 to "≤12h", 24 to "≤24h")
+                isOfficial -> listOf(1 to "Today", 6 to "This Week", 24 to "This Month")
+                else -> listOf(1 to "1h", 6 to "6h", 12 to "12h", 24 to "24h")
             }
             val counts = ui.feed?.counts
 
@@ -666,12 +699,23 @@ private fun Controls(header: HeaderContent, modifier: Modifier = Modifier) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Time period pills
+                // Time period pills (on Spikes: created-within)
+                if (ui.spikes) {
+                    Text(
+                        "Created",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.75f),
+                    )
+                }
                 for ((h, label) in periods) {
-                    val sel = ui.hours == h
+                    val sel = if (ui.spikes) ui.spikesCreatedWithin == h else ui.hours == h
                     FilterChip(
                         selected = sel,
-                        onClick = { header.buzz(); header.actions.onHours(h) },
+                        onClick = {
+                            header.buzz()
+                            if (ui.spikes) header.actions.onSpikesCreatedWithin(h)
+                            else header.actions.onHours(h)
+                        },
                         label = { Text(label, style = MaterialTheme.typography.labelSmall) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = colors.primaryContainer,
@@ -680,9 +724,55 @@ private fun Controls(header: HeaderContent, modifier: Modifier = Modifier) {
                     )
                 }
 
-                // Modes (only when not in Official Trending)
+                // Spikes: source + stories/words
+                if (ui.spikes) {
+                    VerticalDivider(
+                        Modifier.height(18.dp).padding(horizontal = 2.dp),
+                        color = colors.outlineVariant.copy(alpha = 0.5f),
+                    )
+                    Text(
+                        "Source",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.75f),
+                    )
+                    for ((source, label) in listOf(
+                        SpikesSource.ALL to "All",
+                        SpikesSource.HN to "HN",
+                        SpikesSource.TRENDING to "Trending",
+                        SpikesSource.NEW to "New",
+                    )) {
+                        val sel = ui.spikesSource == source
+                        FilterChip(
+                            selected = sel,
+                            onClick = { header.buzz(); header.actions.onSpikesSource(source) },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = colors.tertiaryContainer,
+                                selectedLabelColor = colors.onTertiaryContainer,
+                            ),
+                        )
+                    }
+                    VerticalDivider(
+                        Modifier.height(18.dp).padding(horizontal = 2.dp),
+                        color = colors.outlineVariant.copy(alpha = 0.5f),
+                    )
+                    for ((view, label) in listOf(SpikesView.STORIES to "Spikes", SpikesView.WORDS to "Words")) {
+                        val sel = ui.spikesView == view
+                        FilterChip(
+                            selected = sel,
+                            onClick = { header.buzz(); header.actions.onSpikesView(view) },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = colors.secondaryContainer,
+                                selectedLabelColor = colors.onSecondaryContainer,
+                            ),
+                        )
+                    }
+                }
+
+                // Modes (hidden on Official Trending and Spikes — Spikes is always spike-ranked)
                 AnimatedVisibility(
-                    visible = !isOfficial,
+                    visible = !isOfficial && !ui.spikes,
                     enter = fadeIn(tween(200)) + expandHorizontally(),
                     exit = fadeOut(tween(150)) + shrinkHorizontally(),
                 ) {
@@ -773,7 +863,8 @@ private fun ChartCard(
 ) {
     val colors = MaterialTheme.colorScheme
     val feed = ui.feed ?: return
-    if (ui.source != Source.GH || feed.langs.isEmpty()) return
+    // GitHub-only surface; callers already gate HN / Spikes out.
+    if (ui.spikes || ui.source != Source.GH || feed.langs.isEmpty()) return
     val turn by animateFloatAsState(if (expanded) 180f else 0f, label = "chevron")
 
     Surface(
@@ -924,7 +1015,7 @@ private fun barAt(x: Float, width: Int, n: Int): Int =
 
 
 
-/** Topic chips, and on GitHub the languages, for the window on screen. */
+/** Topic chips for the window on screen. Languages live in Language Breakdown. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TopicsCard(header: HeaderContent, modifier: Modifier = Modifier) {
@@ -933,13 +1024,17 @@ private fun TopicsCard(header: HeaderContent, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     // A chip in use stays even when it has dropped out of the list.
     val topics = feed.topics.map { it.word to it }.let { list ->
-        if (ui.topic.isEmpty() || list.any { it.first == ui.topic }) list else listOf(ui.topic to null) + list
+        if (ui.topic.isEmpty() || list.any { it.first.equals(ui.topic, ignoreCase = true) }) {
+            list
+        } else {
+            listOf(ui.topic to null) + list
+        }
     }
-    val langs = feed.langs.map { it.name to it.count }.let { list ->
-        if (ui.lang.isEmpty() || list.any { it.first == ui.lang }) list else listOf(ui.lang to 0) + list
+    if (topics.isEmpty()) return
+    val windowLabel = when {
+        ui.spikes -> "created ≤${ui.spikesCreatedWithin}h"
+        else -> lastPhrase(ui.hours, ui)
     }
-    val showLangs = langs.isNotEmpty() && ui.source != Source.GH
-    if (topics.isEmpty() && !showLangs) return
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = colors.surfaceContainer) {
         Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -949,40 +1044,21 @@ private fun TopicsCard(header: HeaderContent, modifier: Modifier = Modifier) {
                     Text("Trending topics", style = MaterialTheme.typography.titleSmall, color = colors.onSurface)
                     val fresh = feed.topics.any { it.fresh }
                     Text(
-                        if (fresh) "Most talked about in the ${lastPhrase(ui.hours, ui)} · ↗ picking up fast"
-                        else "Most talked about in the ${lastPhrase(ui.hours, ui)}",
+                        if (fresh) "Most talked about in the $windowLabel · ↗ picking up fast"
+                        else "Most talked about in the $windowLabel · tap to filter",
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurfaceVariant,
                     )
                 }
             }
-            if (topics.isNotEmpty()) {
-                ChipRow(topics) { (word, topic) ->
-                    TopicChip(
-                        label = word,
-                        count = topic?.count ?: 0,
-                        fresh = topic?.fresh == true,
-                        selected = ui.topic == word,
-                        onClick = { header.buzz(); header.actions.onTopic(word) },
-                    )
-                }
-            }
-            if (showLangs) {
-                Text(
-                    "Languages",
-                    modifier = Modifier.padding(horizontal = 14.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.onSurfaceVariant,
+            ChipRow(topics) { (word, topic) ->
+                TopicChip(
+                    label = word,
+                    count = topic?.count ?: 0,
+                    fresh = topic?.fresh == true,
+                    selected = ui.topic.equals(word, ignoreCase = true),
+                    onClick = { header.buzz(); header.actions.onTopic(word) },
                 )
-                ChipRow(langs) { (name, count) ->
-                    TopicChip(
-                        label = name,
-                        count = count,
-                        fresh = false,
-                        selected = ui.lang == name,
-                        onClick = { header.buzz(); header.actions.onLang(name) },
-                    )
-                }
             }
         }
     }
@@ -1002,6 +1078,7 @@ private fun <T> ChipRow(items: List<T>, chip: @Composable (T) -> Unit) {
 @Composable
 private fun TopicChip(label: String, count: Int, fresh: Boolean, selected: Boolean, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val countColor = if (selected) colors.onSecondaryContainer else colors.primary
     FilterChip(
         selected = selected,
         onClick = onClick,
@@ -1009,9 +1086,15 @@ private fun TopicChip(label: String, count: Int, fresh: Boolean, selected: Boole
             Text(
                 buildAnnotatedString {
                     append(label)
+                    // Always show how many posts mention this topic.
                     if (count > 0) {
-                        withStyle(SpanStyle(color = if (selected) colors.onSecondaryContainer.copy(alpha = 0.7f) else colors.onSurfaceVariant)) {
-                            append("  $count")
+                        withStyle(
+                            SpanStyle(
+                                color = countColor,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                        ) {
+                            append(" · $count")
                         }
                     }
                 },
@@ -1024,6 +1107,216 @@ private fun TopicChip(label: String, count: Int, fresh: Boolean, selected: Boole
             else -> null
         },
     )
+}
+
+private fun LazyListScope.spikesWordsList(list: ListContent, pad: Modifier) {
+    val ui = list.ui
+    val feed = ui.feed
+    if (ui.trouble != null && feed != null) {
+        item(key = "trouble") {
+            TroubleBanner(
+                "${ui.trouble} Showing results from ${agoPhrase(feed.fetched, ui.nowSec)}.",
+                onRetry = list.onRetry,
+                modifier = pad.padding(top = 12.dp),
+            )
+        }
+    }
+    item(key = "wordsHead") {
+        Column(pad.padding(top = 16.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                "Trending words",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                "↑ climbed · ↓ fell since last refresh",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    when {
+        feed == null && ui.trouble != null -> item(key = "error") {
+            ErrorCard(ui.trouble, onRetry = list.onRetry, modifier = pad)
+        }
+        feed == null -> items(6) { SkeletonCard(pad.padding(bottom = 10.dp)) }
+        feed.topics.isEmpty() && ui.spikesWordTrends.isEmpty() -> item(key = "wordsEmpty") {
+            SpikesWordsEmpty(pad)
+        }
+        else -> {
+            val trends = ui.spikesWordTrends.ifEmpty {
+                feed.topics.mapIndexed { i, topic ->
+                    SpikesWordTrend(topic = topic, rank = i + 1, move = null)
+                }
+            }
+            items(trends, key = { "word:${it.topic.word}" }) { trend ->
+                SpikesWordRow(
+                    trend = trend,
+                    selected = ui.topic.equals(trend.topic.word, ignoreCase = true),
+                    onClick = {
+                        list.buzz()
+                        list.actions.onSpikesWord(trend.topic.word)
+                    },
+                    modifier = pad.padding(bottom = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpikesWordRow(
+    trend: SpikesWordTrend,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val topic = trend.topic
+    val colors = MaterialTheme.colorScheme
+    val move = trend.move
+    val moveColor = when {
+        move == null -> colors.onSurfaceVariant
+        move > 0 -> Color(0xFF2E7D32)
+        move < 0 -> colors.error
+        else -> colors.onSurfaceVariant
+    }
+    Surface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) colors.secondaryContainer else colors.surfaceContainer,
+        tonalElevation = if (selected) 0.dp else 1.dp,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                "#${trend.rank}",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = if (selected) colors.onSecondaryContainer else colors.primary,
+                modifier = Modifier.width(36.dp),
+            )
+            Column(
+                Modifier.width(52.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                when {
+                    move == null -> {
+                        Text(
+                            "NEW",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.tertiary,
+                        )
+                    }
+                    move > 0 -> {
+                        Icon(AppIcons.TrendingUp, contentDescription = "Up $move", tint = moveColor, modifier = Modifier.size(16.dp))
+                        Text("+$move", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = moveColor)
+                    }
+                    move < 0 -> {
+                        Icon(AppIcons.TrendingDown, contentDescription = "Down ${-move}", tint = moveColor, modifier = Modifier.size(16.dp))
+                        Text("$move", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = moveColor)
+                    }
+                    else -> {
+                        Text("—", style = MaterialTheme.typography.labelSmall, color = moveColor)
+                        Text("same", style = MaterialTheme.typography.labelSmall, color = moveColor)
+                    }
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    topic.word,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (selected) colors.onSecondaryContainer else colors.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val detail = buildList {
+                    add(if (topic.count == 1) "1 post" else "${topic.count} posts")
+                    if (topic.lift > 0.0) add("${topic.lift}×")
+                    if (topic.fresh) add("rising")
+                }.joinToString(" · ")
+                Text(detail, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            }
+            WordSpark(
+                count = topic.count,
+                lift = topic.lift,
+                fresh = topic.fresh,
+                color = if (selected) colors.onSecondaryContainer else colors.primary,
+            )
+            if (selected) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = "Selected",
+                    tint = colors.onSecondaryContainer,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Tiny decorative spark from post count / lift / fresh — no extra feed data needed. */
+@Composable
+private fun WordSpark(
+    count: Int,
+    lift: Double,
+    fresh: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(
+        modifier
+            .size(width = 40.dp, height = 20.dp)
+            .semantics { contentDescription = "word trend spark" },
+    ) {
+        val n = 7
+        val endH = (count.coerceIn(1, 24) / 24f).coerceIn(0.35f, 1f)
+        val liftBoost = (lift / 12.0).toFloat().coerceIn(0f, 0.35f)
+        val gap = 1.8.dp.toPx()
+        val barW = ((size.width - gap * (n - 1)) / n).coerceAtLeast(1.6.dp.toPx())
+        for (i in 0 until n) {
+            val t = i / (n - 1f)
+            val rise = 0.22f + t * (endH - 0.22f)
+            val wave = if (fresh) {
+                0.14f * kotlin.math.sin(i * 1.8f + 0.4f)
+            } else {
+                0.06f * kotlin.math.sin(i * 1.2f)
+            }
+            val h = (rise + wave + if (i >= n - 2) liftBoost else 0f).coerceIn(0.12f, 1f)
+            val barH = size.height * h
+            val left = i * (barW + gap)
+            drawRoundRect(
+                color = color.copy(alpha = 0.30f + 0.55f * h),
+                topLeft = Offset(left, size.height - barH),
+                size = Size(barW, barH),
+                cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx()),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpikesWordsEmpty(modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        modifier.fillMaxWidth().padding(vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "No repeated words in this window. Try ≤24h or All sources.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
 }
 
 private fun LazyListScope.storyList(list: ListContent, pad: Modifier) {
@@ -1176,7 +1469,18 @@ private fun StoryCard(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
-    val hn = ui.source == Source.HN
+    val hn = when {
+        ui.spikes -> !story.id.startsWith("gh:")
+        else -> ui.source == Source.HN
+    }
+    val isOfficialStory = story.id.startsWith("gh:trending:") ||
+        (!ui.spikes && ui.source == Source.GH && ui.ghOfficial)
+    val spikeSourceLabel = when {
+        !ui.spikes -> null
+        isOfficialStory -> "Trending"
+        story.id.startsWith("gh:") -> "New"
+        else -> "HN"
+    }
     val faded = colors.onSurfaceVariant.copy(alpha = 0.7f)
 
     val isStackAffected = story.affectsStack.isNotEmpty() || story.has(Flags.STACK_AFFECTED)
@@ -1214,14 +1518,6 @@ private fun StoryCard(
             if (story.t > 0) add(agoPhrase(story.t, ui.nowSec))
         }.joinToString(" · ")
     }
-    val value = if (ui.mode == Mode.RISING) story.heat else story.score
-    val peak = if (ui.mode == Mode.RISING) feed.peakHeat else feed.peak
-    val frac = (value / peak.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
-    val animatedFrac by animateFloatAsState(
-        targetValue = frac,
-        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
-        label = "scoreFrac",
-    )
     val saveScale by animateFloatAsState(
         targetValue = if (saved) 1.22f else 1.0f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
@@ -1321,8 +1617,11 @@ private fun StoryCard(
                         }
                     }
                 }
-                val tags = remember(story.flags, story.affectsStack, story.crossSource, story.matched, story.tag) {
+                val tags = remember(story.flags, story.affectsStack, story.crossSource, story.matched, story.tag, spikeSourceLabel) {
                     buildList {
+                        if (spikeSourceLabel != null) {
+                            add(StoryTag(spikeSourceLabel, colors.secondaryContainer, colors.onSecondaryContainer))
+                        }
                         if (isStackAffected) {
                             add(StoryTag("In your stack: ${story.affectsStack.ifEmpty { "dependency" }}", colors.errorContainer, colors.onErrorContainer, isCritical = true))
                         }
@@ -1390,10 +1689,16 @@ private fun StoryCard(
                             onClick = { onOpen(story.talk, story.id) },
                         )
                     } else if (story.extra > 0) {
-                        if (ui.source == Source.GH && ui.ghOfficial) {
-                            val periodLabel = when (ui.hours) {
-                                24 -> "this month"
-                                6 -> "this week"
+                        if (isOfficialStory) {
+                            // On Spikes, ui.hours is created-within (6/12/24), not the official
+                            // daily/weekly/monthly slot. Map the slot actually fetched, or stay neutral.
+                            val periodLabel = when {
+                                ui.spikes -> when (ui.spikesCreatedWithin) {
+                                    24 -> "this month" // Spikes merge uses monthly official slot
+                                    else -> "this week" // ≤6h / ≤12h use weekly official slot
+                                }
+                                ui.hours == 24 -> "this month"
+                                ui.hours == 6 -> "this week"
                                 else -> "today"
                             }
                             Stat(
@@ -1437,20 +1742,17 @@ private fun StoryCard(
                         )
                     }
                 }
-                Box(
-                    Modifier
-                        .padding(start = 26.dp)
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .background(colors.onSurfaceVariant.copy(alpha = 0.12f), RoundedCornerShape(2.dp)),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(animatedFrac)
-                            .fillMaxHeight()
-                            .background(accent.copy(alpha = if (read) 0.4f else 0.9f), RoundedCornerShape(2.dp)),
-                    )
-                }
+                GrowthSpark(
+                    story = story,
+                    nowSec = ui.nowSec,
+                    hours = if (ui.spikes) ui.spikesCreatedWithin else ui.hours,
+                    clampToWindow = ui.spikes,
+                    color = if (read) faded else accent,
+                    trackColor = colors.onSurfaceVariant.copy(alpha = if (read) 0.08f else 0.12f),
+                    modifier = Modifier
+                        .padding(start = 26.dp, top = 2.dp)
+                        .fillMaxWidth(),
+                )
             }
         }
     }
@@ -1470,6 +1772,511 @@ private fun Stat(icon: ImageVector, text: String, label: String, tint: Color, on
         Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(15.dp))
         Text(text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = tint)
     }
+}
+
+/**
+ * Compact score-over-time chart under each post.
+ * Bars = gain per step (spikes light up). Line = cumulative count.
+ */
+@Composable
+private fun GrowthSpark(
+    story: Story,
+    nowSec: Long,
+    hours: Int,
+    color: Color,
+    trackColor: Color,
+    modifier: Modifier = Modifier,
+    /** When true (Spikes), axis labels stay inside the ≤6h/≤12h/≤24h window. */
+    clampToWindow: Boolean = false,
+) {
+    val series = remember(
+        story.id, story.spark, story.sparkline, story.score, story.extra,
+        story.meta, story.heat, story.flags, story.t, nowSec / 60, hours, clampToWindow,
+    ) {
+        // Spikes: real history when available; otherwise estimate if score/heat is meaningful.
+        growthSeries(story, nowSec, allowEstimate = true)
+    }
+    if (series.cumulative.size < 2 || series.rates.size < 2) return
+    // Flat / empty / +0 growth is noise — never show it.
+    if (series.delta < 1f) return
+    val unit = when {
+        story.id.startsWith("gh:trending:") -> "stars"
+        story.id.startsWith("gh:") -> "stars"
+        else -> "points"
+    }
+    val deltaText = remember(series.delta) {
+        val d = series.delta
+        when {
+            d >= 1f -> "+${TrendingCore.fmtCompact(d.toDouble())}"
+            d > 0f -> "+${"%.1f".format(d)}"
+            else -> "+${TrendingCore.fmtCompact(series.cumulative.last().toDouble())}"
+        }
+    }
+    val startLabel = remember(story.id, story.t, hours, clampToWindow, nowSec / 60) {
+        sparkTimeStartLabel(story, hours, nowSec, clampToWindow)
+    }
+    val midLabel = remember(story.id, story.t, hours, clampToWindow, nowSec / 60) {
+        sparkTimeMidLabel(story, hours, nowSec, clampToWindow)
+    }
+    val spikeColor = MaterialTheme.colorScheme.error
+    val axisColor = color.copy(alpha = 0.55f)
+
+    Column(
+        modifier.semantics {
+            contentDescription = "$unit growth chart, $deltaText, ${series.spikeCount} spikes, $startLabel to now"
+        },
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(40.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Canvas(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(8.dp))
+                .background(trackColor),
+        ) {
+            val cumulative = series.cumulative
+            val rates = series.rates
+            val spikes = series.spikeMask
+            val n = cumulative.size
+            val padX = 6.dp.toPx()
+            val padTop = 5.dp.toPx()
+            val padBottom = 4.dp.toPx()
+            val chartW = (size.width - padX * 2f).coerceAtLeast(1f)
+            val chartH = (size.height - padTop - padBottom).coerceAtLeast(1f)
+            val maxCum = (cumulative.maxOrNull() ?: 1f).coerceAtLeast(1f)
+            val maxRate = (rates.maxOrNull() ?: 1f).coerceAtLeast(1f)
+            val gap = (chartW / n) * 0.22f
+            val barW = ((chartW / n) - gap).coerceAtLeast(1.8.dp.toPx())
+            val stepX = chartW / (n - 1).coerceAtLeast(1)
+
+            fun yCum(v: Float): Float = padTop + chartH * (1f - v / maxCum)
+            fun yRate(v: Float): Float = padTop + chartH * (1f - v / maxRate)
+
+            for (frac in listOf(0.25f, 0.5f, 0.75f)) {
+                val y = padTop + chartH * (1f - frac)
+                drawLine(
+                    color = color.copy(alpha = 0.10f),
+                    start = Offset(padX, y),
+                    end = Offset(size.width - padX, y),
+                    strokeWidth = 1.dp.toPx(),
+                )
+            }
+
+            // Rate bars — spikes get a hotter fill
+            rates.forEachIndexed { i, rate ->
+                val xCenter = padX + i * stepX
+                val top = yRate(rate)
+                val barH = (size.height - padBottom - top).coerceAtLeast(1.dp.toPx())
+                val left = xCenter - barW / 2f
+                val isSpike = spikes.getOrElse(i) { false }
+                val fill = if (isSpike) spikeColor.copy(alpha = 0.78f) else color.copy(alpha = 0.28f + 0.35f * (rate / maxRate))
+                drawRoundRect(
+                    color = fill,
+                    topLeft = Offset(left, top),
+                    size = Size(barW, barH),
+                    cornerRadius = CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx()),
+                )
+            }
+
+            // Cumulative line + soft fill
+            val line = Path().apply {
+                cumulative.forEachIndexed { i, v ->
+                    val x = padX + i * stepX
+                    val y = yCum(v)
+                    if (i == 0) moveTo(x, y) else lineTo(x, y)
+                }
+            }
+            val fill = Path().apply {
+                addPath(line)
+                lineTo(padX + (n - 1) * stepX, size.height - padBottom)
+                lineTo(padX, size.height - padBottom)
+                close()
+            }
+            drawPath(
+                fill,
+                brush = Brush.verticalGradient(
+                    colors = listOf(color.copy(alpha = 0.20f), color.copy(alpha = 0.02f)),
+                    startY = padTop,
+                    endY = size.height,
+                ),
+            )
+            drawPath(
+                line,
+                color = color.copy(alpha = 0.95f),
+                style = Stroke(width = 1.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+
+            cumulative.forEachIndexed { i, v ->
+                val x = padX + i * stepX
+                val y = yCum(v)
+                val isSpike = spikes.getOrElse(i) { false }
+                val r = when {
+                    i == n - 1 -> 2.8.dp.toPx()
+                    isSpike -> 2.4.dp.toPx()
+                    else -> 1.3.dp.toPx()
+                }
+                drawCircle(
+                    color = if (isSpike) spikeColor else color.copy(alpha = if (i == n - 1) 1f else 0.55f),
+                    radius = r,
+                    center = Offset(x, y),
+                )
+            }
+        }
+
+        Column(
+            Modifier.widthIn(min = 42.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text(
+                deltaText,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = color,
+                maxLines = 1,
+            )
+            when {
+                !series.measured && series.spikeCount > 0 -> Text(
+                    "est. · ${series.spikeCount} spike${if (series.spikeCount == 1) "" else "s"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = color.copy(alpha = 0.55f),
+                    maxLines = 1,
+                )
+                series.spikeCount > 0 -> Text(
+                    "${series.spikeCount} spike${if (series.spikeCount == 1) "" else "s"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = spikeColor.copy(alpha = 0.9f),
+                    maxLines = 1,
+                )
+                !series.measured -> Text(
+                    "est.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = color.copy(alpha = 0.45f),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(end = 50.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(startLabel, style = MaterialTheme.typography.labelSmall, color = axisColor, maxLines = 1)
+            if (midLabel.isNotEmpty()) {
+                Text(midLabel, style = MaterialTheme.typography.labelSmall, color = axisColor.copy(alpha = 0.75f), maxLines = 1)
+            }
+            Text("now", style = MaterialTheme.typography.labelSmall, color = axisColor, maxLines = 1)
+        }
+    }
+}
+
+/** Left-edge time under a growth chart. */
+private fun sparkTimeStartLabel(
+    story: Story,
+    hours: Int,
+    nowSec: Long,
+    clampToWindow: Boolean,
+): String {
+    if (clampToWindow) {
+        // Spikes ≤6h / ≤12h / ≤24h — axis matches the filter, not full post age.
+        return when (hours) {
+            6 -> "6h"
+            12 -> "12h"
+            24 -> "24h"
+            else -> "${hours}h"
+        }
+    }
+    if (story.id.startsWith("gh:trending:")) {
+        return when (hours) {
+            24 -> "month"
+            6 -> "week"
+            else -> "today"
+        }
+    }
+    if (story.t > 0L) {
+        return agoPhrase(story.t, nowSec).replace(" ago", "")
+    }
+    return "start"
+}
+
+/** Optional mid-axis mark under a growth chart. */
+private fun sparkTimeMidLabel(
+    story: Story,
+    hours: Int,
+    nowSec: Long,
+    clampToWindow: Boolean,
+): String {
+    if (clampToWindow) {
+        return when (hours) {
+            6 -> "3h"
+            12 -> "6h"
+            24 -> "12h"
+            else -> ""
+        }
+    }
+    if (story.id.startsWith("gh:trending:")) {
+        return when (hours) {
+            24 -> "~2w"
+            6 -> "~3d"
+            else -> "~12h"
+        }
+    }
+    if (story.t <= 0L) return ""
+    val mid = story.t + ((nowSec - story.t) / 2).coerceAtLeast(0L)
+    if (mid <= story.t || mid >= nowSec) return ""
+    return agoPhrase(mid, nowSec).replace(" ago", "")
+}
+
+private data class GrowthSeries(
+    val cumulative: List<Float>,
+    val rates: List<Float>,
+    val spikeMask: List<Boolean>,
+    val delta: Float,
+    val measured: Boolean,
+) {
+    val spikeCount: Int get() = spikeMask.count { it }
+}
+
+/**
+ * Prefer real spark history; otherwise estimate when score/heat/period gain is meaningful.
+ * Spikes uses estimates so every post can show a chart until history builds up.
+ */
+private fun growthSeries(story: Story, nowSec: Long, allowEstimate: Boolean = true): GrowthSeries {
+    if (story.id.startsWith("gh:trending:")) {
+        if (!allowEstimate) return GrowthSeries(emptyList(), emptyList(), emptyList(), 0f, measured = false)
+        // Need period stars or total stars to draw anything useful.
+        if (story.extra < 1.0 && story.score < 1.0 && story.heat < 1.0) {
+            return GrowthSeries(emptyList(), emptyList(), emptyList(), 0f, measured = false)
+        }
+        return trendingGrowthSeries(story)
+    }
+
+    fun fromCumulative(pts: List<Float>, measured: Boolean): GrowthSeries {
+        if (pts.size < 2) return GrowthSeries(emptyList(), emptyList(), emptyList(), 0f, measured)
+        val rates = List(pts.size) { i ->
+            if (i == 0) pts[0].coerceAtLeast(0f)
+            else (pts[i] - pts[i - 1]).coerceAtLeast(0f)
+        }
+        return withSpikes(pts, rates, measured)
+    }
+
+    val gain = story.score.toFloat().coerceAtLeast(0f)
+
+    // Trust history only when the span is a meaningful share of the score.
+    // Recent-only samples (flat high line, tiny tip delta) fall through to estimate.
+    if (story.spark.size >= 2 && gain > 0f) {
+        val pts = story.spark.map { it.toFloat().coerceAtLeast(0f) }
+        val lo = pts.minOrNull() ?: 0f
+        val hi = pts.maxOrNull() ?: 0f
+        val span = (hi - lo).coerceAtLeast(0f)
+        val coversGrowth = span >= maxOf(5f, gain * 0.15f) && lo <= gain * 0.5f
+        if (coversGrowth) return fromCumulative(pts, measured = true)
+    }
+
+    if (!allowEstimate) {
+        return GrowthSeries(emptyList(), emptyList(), emptyList(), 0f, measured = false)
+    }
+
+    // Meaningful enough to draw: points/stars or heat.
+    if (gain < 1f && story.heat < 1.0 && story.extra < 1.0) {
+        return GrowthSeries(emptyList(), emptyList(), emptyList(), 0f, measured = false)
+    }
+
+    val ageSec = if (story.t > 0L) (nowSec - story.t).coerceAtLeast(0L) else 0L
+    // Unknown age: still chart from score using a short synthetic window.
+    if (story.t <= 0L || ageSec < 60L) {
+        if (gain < 1f) return GrowthSeries(emptyList(), emptyList(), emptyList(), 0f, measured = false)
+        return scaleRates(syntheticRates(story, ageH = 6.0), gain, measured = false)
+    }
+
+    val ageH = (ageSec / 3600.0).coerceAtLeast(0.15)
+    return scaleRates(syntheticRates(story, ageH), gain, measured = false)
+}
+
+/** Rate profile for estimated growth charts (HN / New Repos). */
+private fun syntheticRates(story: Story, ageH: Double): FloatArray {
+    val bars = 14
+    val accelerating = story.has(Flags.ACCELERATING) || story.has(Flags.BREAKOUT) ||
+        (story.has(Flags.RISING) && story.heat >= 20.0)
+    val heat = story.heat.toFloat().coerceAtLeast(0f)
+    val seed = storyFingerprint(story.id)
+
+    return FloatArray(bars) { i ->
+        val t = i.toFloat() / (bars - 1).coerceAtLeast(1)
+        val base = if (ageH >= 12.0) {
+            (1.15f - t).coerceAtLeast(0.15f)
+        } else {
+            0.45f + 0.35f * (1f - kotlin.math.abs(t - (0.30f + seed.frac(0) * 0.15f)))
+        }
+        var rate = base
+
+        val spikeCenter = when {
+            accelerating -> 0.72f + seed.frac(1) * 0.14f
+            heat >= 20f -> 0.55f + seed.frac(1) * 0.18f
+            heat >= 8f -> 0.40f + seed.frac(1) * 0.20f
+            else -> 0.28f + seed.frac(1) * 0.35f
+        }
+        val width = (if (accelerating) 0.09f else 0.13f) + seed.frac(2) * 0.04f
+        val dist = kotlin.math.abs(t - spikeCenter) / width
+        if (dist < 1.8f) {
+            val amp = when {
+                story.has(Flags.BREAKOUT) || accelerating -> 2.8f + seed.frac(3) * 1.0f
+                story.has(Flags.RISING) || heat >= 20f -> 2.0f + seed.frac(3) * 0.9f
+                else -> 1.1f + seed.frac(3) * 0.8f
+            }
+            rate += amp * kotlin.math.exp(-dist * dist * 2.2f)
+        }
+
+        val bump2Center = 0.14f + seed.frac(4) * 0.22f
+        val bump2 = kotlin.math.abs(t - bump2Center) / (0.08f + seed.frac(5) * 0.04f)
+        if (bump2 < 1.6f) {
+            rate += (0.40f + seed.frac(6) * 0.45f) * kotlin.math.exp(-bump2 * bump2 * 2.0f)
+        }
+
+        rate += seed.signed(i) * 0.06f
+        rate.coerceAtLeast(0.05f)
+    }
+}
+
+/**
+ * GitHub Trending has no post time — only total stars + period gain.
+ * Pick a distinct silhouette per repo from burstiness + id so charts
+ * are not the same curve scaled up.
+ */
+private fun trendingGrowthSeries(story: Story): GrowthSeries {
+    val period = story.extra.toFloat().coerceAtLeast(0f)
+    val total = story.score.toFloat().coerceAtLeast(0f)
+    val gain = when {
+        period > 0f -> period
+        total > 0f -> total.coerceAtMost(500f)
+        else -> 0f
+    }
+    if (gain <= 0f) return GrowthSeries(emptyList(), emptyList(), emptyList(), 0f, measured = false)
+
+    val seed = storyFingerprint(story.id + "|" + story.meta + "|" + period.toInt() + "|" + total.toInt())
+    val burstiness = if (total > 0f) (period / total).coerceIn(0f, 2f) else 0.4f
+    // 5 clearly different silhouettes, chosen by data + id.
+    val profile = when {
+        burstiness >= 0.45f -> 0 // late rocket
+        burstiness >= 0.18f -> 1 // mid surge
+        burstiness >= 0.06f -> 2 // early then taper
+        period >= 5000f -> 3 // double hump (big movers)
+        else -> 4 // steady grind
+    }.let { base -> (base + seed.int(0, 5)) % 5 }
+
+    val bars = 14
+    val rates = FloatArray(bars) { i ->
+        val t = i.toFloat() / (bars - 1).coerceAtLeast(1)
+        var rate = when (profile) {
+            0 -> { // quiet then sharp late spike
+                val spike = kotlin.math.exp(-((t - (0.78f + seed.frac(1) * 0.12f)) / 0.07f).let { it * it } * 2.4f)
+                0.12f + 0.15f * t + (2.8f + seed.frac(2) * 1.6f) * spike
+            }
+            1 -> { // mid-period surge
+                val c = 0.42f + seed.frac(1) * 0.22f
+                val spike = kotlin.math.exp(-((t - c) / 0.10f).let { it * it } * 2.0f)
+                0.25f + 0.35f * kotlin.math.sin(t * Math.PI.toFloat()) + (2.0f + seed.frac(2)) * spike
+            }
+            2 -> { // early rush, then cools
+                val c = 0.16f + seed.frac(1) * 0.18f
+                val spike = kotlin.math.exp(-((t - c) / 0.09f).let { it * it } * 2.0f)
+                0.20f + (2.2f + seed.frac(2)) * spike + 0.35f * (1f - t)
+            }
+            3 -> { // two clear peaks
+                val c1 = 0.22f + seed.frac(1) * 0.15f
+                val c2 = 0.68f + seed.frac(2) * 0.18f
+                val s1 = kotlin.math.exp(-((t - c1) / 0.08f).let { it * it } * 2.2f)
+                val s2 = kotlin.math.exp(-((t - c2) / 0.08f).let { it * it } * 2.2f)
+                0.18f + (1.6f + seed.frac(3)) * s1 + (1.9f + seed.frac(4)) * s2
+            }
+            else -> { // steady with mild wobble
+                0.55f + 0.25f * t + 0.20f * kotlin.math.sin((t * 5.5f + seed.frac(1) * 6.28f))
+            }
+        }
+        rate += seed.signed(i) * 0.12f
+        rate.coerceAtLeast(0.05f)
+    }
+
+    return scaleRates(rates, gain, measured = false)
+}
+
+private fun scaleRates(rates: FloatArray, gain: Float, measured: Boolean): GrowthSeries {
+    val rateSum = rates.sum().coerceAtLeast(1e-3f)
+    val scaledRates = rates.map { it / rateSum * gain }
+    // Start cumulative at 0 so the side label matches full score / period gain.
+    var running = 0f
+    val cumulative = ArrayList<Float>(scaledRates.size + 1).apply {
+        add(0f)
+        scaledRates.forEach { step ->
+            running += step
+            add(running)
+        }
+    }
+    val alignedRates = List(cumulative.size) { i ->
+        if (i == 0) 0f else scaledRates[i - 1]
+    }
+    return withSpikes(cumulative, alignedRates, measured)
+}
+/** Stable mix of a string for deterministic chart fingerprints. */
+private class StorySeed(private val bits: Int) {
+    fun frac(lane: Int): Float {
+        var x = bits xor (lane + 1) * 0x9e3779b9.toInt()
+        x = x xor (x ushr 16)
+        x *= 0x85ebca6b.toInt()
+        x = x xor (x ushr 13)
+        x *= 0xc2b2ae35.toInt()
+        x = x xor (x ushr 16)
+        return (x and 0xffff) / 65535f
+    }
+
+    fun signed(lane: Int): Float = frac(lane) * 2f - 1f
+
+    fun int(lane: Int, bound: Int): Int {
+        if (bound <= 1) return 0
+        return (frac(lane) * bound).toInt().coerceIn(0, bound - 1)
+    }
+}
+
+private fun storyFingerprint(key: String): StorySeed {
+    var h = -2128831035
+    for (ch in key) {
+        h = (h xor ch.code) * 16777619
+    }
+    return StorySeed(h)
+}
+
+private fun withSpikes(cumulative: List<Float>, rates: List<Float>, measured: Boolean): GrowthSeries {
+    val positive = rates.filter { it > 0f }
+    val median = if (positive.isEmpty()) 0f else {
+        val sorted = positive.sorted()
+        sorted[sorted.size / 2]
+    }
+    val threshold = when {
+        median <= 0f -> (rates.maxOrNull() ?: 0f) * 0.7f
+        else -> median * 1.65f
+    }
+    val spikes = rates.map { it >= threshold && it > 0f && threshold > 0f }
+    // Keep at least the tallest bar marked when heat-driven series has one clear peak.
+    val maxRate = rates.maxOrNull() ?: 0f
+    val spikeMask = if (spikes.none { it } && maxRate > 0f) {
+        rates.map { it >= maxRate * 0.92f }
+    } else {
+        spikes
+    }
+    val delta = (cumulative.last() - cumulative.first()).coerceAtLeast(0f).let {
+        if (it > 0f) it else cumulative.last().coerceAtLeast(0f)
+    }
+    return GrowthSeries(cumulative, rates, spikeMask, delta, measured)
 }
 
 @Composable
@@ -1752,7 +2559,8 @@ private fun modeName(mode: Mode) = when (mode) {
 }
 
 private fun listTitle(ui: TrendingUi): String {
-    if (ui.source == Source.GH && ui.ghOfficial) {
+    if (ui.spikes) return "Recent high spikes"
+    if (!ui.spikes && ui.source == Source.GH && ui.ghOfficial) {
         return "Official Trending Repos"
     }
     val hn = ui.source == Source.HN
@@ -1764,6 +2572,16 @@ private fun listTitle(ui: TrendingUi): String {
 }
 
 private fun listNote(ui: TrendingUi): String {
+    if (ui.spikes) {
+        val age = "created ≤${ui.spikesCreatedWithin}h"
+        val src = when (ui.spikesSource) {
+            SpikesSource.ALL -> "all sources"
+            SpikesSource.HN -> "Hacker News"
+            SpikesSource.TRENDING -> "GitHub Trending"
+            SpikesSource.NEW -> "New Repos"
+        }
+        return "$age · $src · ranked by spike"
+    }
     if (ui.source == Source.GH && ui.ghOfficial) {
         val window = lastPhrase(ui.hours, ui)
         return "GitHub official trending repositories for $window"
@@ -1793,12 +2611,11 @@ private fun statusLine(ui: TrendingUi): String {
     val feed = ui.feed
     if (feed == null) return if (ui.trouble != null) "Offline" else "Loading…"
     val count = TrendingCore.fmtCompact(feed.total.toDouble())
-    val what = if (ui.source == Source.HN) {
-        if (feed.total == 1L) "story" else "stories"
-    } else if (ui.ghOfficial) {
-        "trending repos"
-    } else {
-        "new repos"
+    val what = when {
+        ui.spikes -> if (feed.matching == 1) "spike" else "spikes"
+        ui.source == Source.HN -> if (feed.total == 1L) "story" else "stories"
+        ui.ghOfficial -> "trending repos"
+        else -> "new repos"
     }
     val fresh = if (ui.loading) "Updating…" else "Updated ${agoPhrase(feed.fetched, ui.nowSec)}"
     return "$count $what · $fresh"

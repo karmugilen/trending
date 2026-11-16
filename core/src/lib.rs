@@ -64,6 +64,9 @@ pub struct Shown {
     pub domain: String,
     #[serde(default)]
     pub sparkline: String,
+    /// Sampled score history for the tiny growth chart. Empty until enough refreshes.
+    #[serde(default)]
+    pub spark: Vec<f64>,
     #[serde(default)]
     pub affects_stack: String,
     #[serde(default)]
@@ -330,7 +333,8 @@ fn assemble(
                 _ => String::new(),
             };
             let samples = store::get_history(&story.id);
-            let sparkline = signals::sparkline_for_samples(&samples, 4);
+            let spark = signals::spark_scores_for_samples(&samples, 8);
+            let sparkline = signals::sparkline_for_samples(&samples, 8);
             let cross = source == Source::Hn && canonical_repo(&story.url, &story.title).is_some();
             let is_new_trending = source == Source::Gh && signals::is_new_and_trending(story, &sig, now);
             Shown {
@@ -343,6 +347,7 @@ fn assemble(
                 matched: sig.matched,
                 domain,
                 sparkline,
+                spark,
                 affects_stack: sig.affects_stack,
                 cross_source: cross || sig.cross_source,
             }
@@ -527,7 +532,8 @@ pub fn generate_briefing(
         }
         let mut sig = signals::read_pre(&story, &pre, source, now_sec, interests, sensitivity);
         let samples = store::get_history(&story.id);
-        sig.sparkline = signals::sparkline_for_samples(&samples, 4);
+        let spark = signals::spark_scores_for_samples(&samples, 8);
+        sig.sparkline = signals::sparkline_for_samples(&samples, 8);
 
         let vel = signals::kinetic_velocity(&samples, now_sec, 3600);
         if signals::is_accelerating(&samples, now_sec) || vel >= 25.0 || sig.heat >= 35.0 {
@@ -557,6 +563,7 @@ pub fn generate_briefing(
             matched: sig.matched,
             domain,
             sparkline: sig.sparkline,
+            spark,
             affects_stack: sig.affects_stack,
             cross_source: sig.cross_source,
         };

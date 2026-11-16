@@ -55,6 +55,11 @@ class WatchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
 
         if (slots.isNotEmpty()) {
             AlertCenter.get(applicationContext).check(slots)
+            try {
+                app.omalauncher.trending.widget.BreakoutWidgetProvider.refreshAll(applicationContext)
+            } catch (_: Exception) {
+                // Widget update is best-effort.
+            }
             return Result.success()
         }
         return if (attempts > 0 && ioFailures == attempts) Result.retry() else Result.success()

@@ -20,6 +20,35 @@ enum class Mode(val code: Int, val key: String) {
     }
 }
 
+/** Spikes tab content: spike-ranked stories, or repeated/trending words. */
+enum class SpikesView {
+    STORIES,
+    WORDS,
+}
+
+/** Which feed family to keep on the Spikes board. */
+enum class SpikesSource {
+    ALL,
+    HN,
+    TRENDING,
+    NEW,
+}
+
+/**
+ * One trending word on the Spikes Words board, with rank movement vs the last
+ * refresh so you can see what is climbing or cooling off.
+ */
+data class SpikesWordTrend(
+    val topic: Topic,
+    /** 1-based place on the board. */
+    val rank: Int,
+    /**
+     * Places moved since the previous snapshot: positive = climbed, negative = fell,
+     * 0 = held, null = new on the board.
+     */
+    val move: Int?,
+)
+
 /** Bits in [Story.flags]. Rust sets them; keep in sync with core/src/signals.rs. */
 object Flags {
     const val RISING = 1
@@ -53,6 +82,8 @@ data class Story(
     /** Site the link points to, like "nytimes.com". Empty for GitHub and Ask HN posts. */
     val domain: String = "",
     val sparkline: String = "",
+    /** Sampled score history for the tiny growth chart. Empty until enough refreshes. */
+    val spark: List<Double> = emptyList(),
     val affectsStack: String = "",
     val crossSource: Boolean = false,
 ) {

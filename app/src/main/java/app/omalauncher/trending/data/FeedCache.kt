@@ -12,6 +12,7 @@ import java.io.File
  */
 class FeedCache(context: Context) {
     private val dir = File(context.applicationContext.cacheDir, "feeds")
+    private val historyFile = File(context.applicationContext.cacheDir, "metric_history.json")
 
     /** Load [slot] from disk into Rust unless Rust already has something newer. */
     fun restore(slot: String): Boolean {
@@ -23,6 +24,30 @@ class FeedCache(context: Context) {
             Log.w(TAG, "dropping unreadable cache $slot", e)
             file.delete()
             false
+        }
+    }
+
+    /** Restore score-over-time samples so growth charts keep improving across launches. */
+    fun restoreHistory() {
+        if (!historyFile.isFile) return
+        try {
+            TrendingCore.importHistory(historyFile.readText())
+        } catch (e: Exception) {
+            Log.w(TAG, "dropping unreadable metric history", e)
+            historyFile.delete()
+        }
+    }
+
+    fun saveHistory() {
+        try {
+            val json = TrendingCore.exportHistory()
+            if (json.isBlank() || json == "{}") return
+            dir.mkdirs()
+            val tmp = File(historyFile.parentFile, "${historyFile.name}.tmp")
+            tmp.writeText(json)
+            if (!tmp.renameTo(historyFile)) tmp.delete()
+        } catch (e: Exception) {
+            Log.w(TAG, "could not cache metric history", e)
         }
     }
 

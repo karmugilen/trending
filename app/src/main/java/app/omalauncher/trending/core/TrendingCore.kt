@@ -284,6 +284,7 @@ class TrendingCore private constructor() {
             matched = item.optString("matched"),
             domain = item.optString("domain"),
             sparkline = item.optString("sparkline"),
+            spark = doubles(item, "spark"),
             affectsStack = item.optString("affects_stack"),
             crossSource = item.optBoolean("cross_source", false),
         )

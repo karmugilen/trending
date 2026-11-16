@@ -40,7 +40,67 @@ const state = {
   alerts: [],
   alertFilter: "all",
   notifiedStoryIds: new Set(JSON.parse(sessionStorage.getItem("trending_notified") || "[]")),
+  /** Per-source hours/mode/filters restored when switching Hacker News ↔ GitHub. */
+  sourceMemory: {},
 };
+
+function snapshotSourceMemory() {
+  return {
+    mode: state.mode,
+    hours: state.hours,
+    topic: state.topic,
+    lang: state.lang,
+    bar: state.bar,
+    only: state.only,
+    activeBarLabel: state.activeBarLabel,
+  };
+}
+
+function rememberCurrentSource() {
+  state.sourceMemory[state.source] = snapshotSourceMemory();
+}
+
+function restoreSourceMemory(source) {
+  const saved = state.sourceMemory[source];
+  if (!saved) {
+    state.topic = "";
+    state.lang = "";
+    state.bar = -1;
+    state.activeBarLabel = "";
+    return;
+  }
+  state.mode = saved.mode;
+  state.hours = saved.hours;
+  state.topic = saved.topic || "";
+  state.lang = source === "gh" ? (saved.lang || "") : "";
+  state.bar = typeof saved.bar === "number" ? saved.bar : -1;
+  state.only = saved.only || "";
+  state.activeBarLabel = saved.activeBarLabel || "";
+}
+
+function syncSourceControls() {
+  document.querySelectorAll("#source-group .segmented-btn").forEach(b => {
+    b.classList.toggle("active", b.getAttribute("data-source") === state.source);
+  });
+  document.querySelectorAll("#mode-group .segmented-btn").forEach(b => {
+    b.classList.toggle("active", b.getAttribute("data-mode") === state.mode);
+  });
+  const hoursEl = document.getElementById("select-hours");
+  if (hoursEl) hoursEl.value = String(state.hours);
+  document.querySelectorAll("#quick-filters-row .chip").forEach(c => {
+    c.classList.toggle("active", (c.getAttribute("data-filter") || "") === (state.only || ""));
+  });
+  const barIndicator = document.getElementById("bar-filter-indicator");
+  const barName = document.getElementById("bar-filter-name");
+  if (barIndicator && barName) {
+    if (state.bar >= 0 && state.activeBarLabel) {
+      barIndicator.style.display = "inline-flex";
+      barName.textContent = state.activeBarLabel;
+    } else {
+      barIndicator.style.display = "none";
+    }
+  }
+}
 
 // Initialize
 document.addEventListener("DOMContentLoaded", async () => {
@@ -77,11 +137,8 @@ async function loadSettings() {
       state.mode = data.mode || "hot";
       state.hours = data.hours || 6;
       applyTheme(data.themeMode, data.palette);
-
-      // sync UI controls
-      document.querySelector(`[data-source="${state.source}"]`)?.click();
-      document.querySelector(`[data-mode="${state.mode}"]`)?.click();
-      document.getElementById("select-hours").value = state.hours;
+      rememberCurrentSource();
+      syncSourceControls();
     }
   } catch (err) {
     console.warn("Could not load settings:", err);
@@ -336,6 +393,7 @@ function renderChart(hotBars, newBars, barLabels) {
         document.getElementById("bar-filter-indicator").style.display = "inline-flex";
         document.getElementById("bar-filter-name").textContent = label;
       }
+      rememberCurrentSource();
       refreshFeed();
     });
 
@@ -358,6 +416,7 @@ function renderTopics(topics) {
     btn.addEventListener("click", () => {
       const w = btn.getAttribute("data-topic");
       state.topic = state.topic === w ? "" : w;
+      rememberCurrentSource();
       refreshFeed();
     });
   });
@@ -379,6 +438,7 @@ function renderLangs(langs) {
     btn.addEventListener("click", () => {
       const l = btn.getAttribute("data-lang");
       state.lang = state.lang === l ? "" : l;
+      rememberCurrentSource();
       refreshFeed();
     });
   });
@@ -1008,6 +1068,7 @@ function clearAllFilters() {
   state.topic = "";
   state.lang = "";
   state.bar = -1;
+  state.activeBarLabel = "";
   state.only = "";
   document.getElementById("search-input").value = "";
   document.getElementById("search-clear").style.display = "none";
@@ -1015,20 +1076,20 @@ function clearAllFilters() {
   document.querySelectorAll("#quick-filters-row .chip").forEach(c => {
     c.classList.toggle("active", c.getAttribute("data-filter") === "");
   });
+  rememberCurrentSource();
   refreshFeed();
 }
 
 function setupEventHandlers() {
-  // Source switches (HN / GH)
+  // Source switches (HN / GH) — remember each source's hours/mode/filters
   document.querySelectorAll("#source-group .segmented-btn").forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll("#source-group .segmented-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      state.source = btn.getAttribute("data-source");
-      state.topic = "";
-      state.lang = "";
-      state.bar = -1;
-      document.getElementById("bar-filter-indicator").style.display = "none";
+      const next = btn.getAttribute("data-source");
+      if (next === state.source) return;
+      rememberCurrentSource();
+      state.source = next;
+      restoreSourceMemory(next);
+      syncSourceControls();
       refreshFeed();
     });
   });
@@ -1039,6 +1100,7 @@ function setupEventHandlers() {
       document.querySelectorAll("#mode-group .segmented-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       state.mode = btn.getAttribute("data-mode");
+      rememberCurrentSource();
       refreshFeed();
     });
   });
@@ -1047,7 +1109,9 @@ function setupEventHandlers() {
   document.getElementById("select-hours").addEventListener("change", e => {
     state.hours = parseInt(e.target.value, 10);
     state.bar = -1;
+    state.activeBarLabel = "";
     document.getElementById("bar-filter-indicator").style.display = "none";
+    rememberCurrentSource();
     refreshFeed();
   });
 
@@ -1112,7 +1176,9 @@ function setupEventHandlers() {
   // Bar filter clear pill
   document.getElementById("bar-filter-badge").addEventListener("click", () => {
     state.bar = -1;
+    state.activeBarLabel = "";
     document.getElementById("bar-filter-indicator").style.display = "none";
+    rememberCurrentSource();
     refreshFeed();
   });
 
@@ -1122,6 +1188,7 @@ function setupEventHandlers() {
       document.querySelectorAll("#quick-filters-row .chip").forEach(c => c.classList.remove("active"));
       chip.classList.add("active");
       state.only = chip.getAttribute("data-filter") || "";
+      rememberCurrentSource();
       refreshFeed();
     });
   });

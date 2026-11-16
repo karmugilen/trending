@@ -283,18 +283,27 @@ pub fn is_accelerating(samples: &[MetricSample], now: i64) -> bool {
     recent_vel >= 15.0 && (recent_vel >= prior_vel * 1.3 || prior_vel == 0.0)
 }
 
+/// Evenly sampled score values for a tiny growth chart. Empty when history is too short.
+pub fn spark_scores_for_samples(samples: &[MetricSample], bars: usize) -> Vec<f64> {
+    if samples.len() < 2 || bars == 0 {
+        return Vec::new();
+    }
+    let n = samples.len();
+    let step = (n as f64 / bars as f64).max(1.0);
+    let mut sampled = Vec::with_capacity(bars);
+    for i in 0..bars {
+        let idx = ((i as f64 * step) as usize).min(n - 1);
+        sampled.push(samples[idx].score.max(0.0));
+    }
+    sampled
+}
+
 pub fn sparkline_for_samples(samples: &[MetricSample], bars: usize) -> String {
-    if samples.len() < 2 {
+    let sampled = spark_scores_for_samples(samples, bars);
+    if sampled.is_empty() {
         return String::new();
     }
     let blocks = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let n = samples.len();
-    let step = (n as f64 / bars as f64).max(1.0);
-    let mut sampled = Vec::new();
-    for i in 0..bars {
-        let idx = ((i as f64 * step) as usize).min(n - 1);
-        sampled.push(samples[idx].score);
-    }
     let min = sampled.iter().cloned().fold(f64::INFINITY, f64::min);
     let max = sampled.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let range = (max - min).max(1.0);
@@ -673,6 +682,7 @@ mod tests {
         assert!(vel > 50.0);
         let spark = sparkline_for_samples(&samples, 3);
         assert_eq!(3, spark.chars().count());
+        assert_eq!(vec![10.0, 50.0, 120.0], spark_scores_for_samples(&samples, 3));
         assert!(is_accelerating(&samples, 4600));
     }
 }
