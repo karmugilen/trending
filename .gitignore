@@ -30,3 +30,13 @@ web/data/settings.json
 .DS_Store
 Thumbs.db
 *~
+
+# Local Python virtualenv
+.venv/
+
+# Signing keys and their passwords (never commit these).
+# debug.keystore is already tracked on purpose for debug builds; it is public.
+*.jks
+*.keystore
+!debug.keystore
+keystore.properties

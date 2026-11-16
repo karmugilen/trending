@@ -1,0 +1,8 @@
+# Desktop web viewer (FastAPI). Versions tested together; install with:
+#   python3 -m venv .venv && .venv/bin/pip install -r web/requirements.txt
+fastapi==0.163.0
+uvicorn==0.54.0
+httpx==0.28.1
+pydantic==2.14.3
+# Needed for multipart bookmark import (/api/saved/import)
+python-multipart==0.0.33

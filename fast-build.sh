@@ -12,8 +12,12 @@ if [ "$MODE" = "release" ]; then
     ./gradlew :app:assembleRelease --daemon -Dorg.gradle.parallel=true -Dorg.gradle.caching=true
     if [ -f "app/build/outputs/apk/release/app-arm64-v8a-release.apk" ]; then
         APK="app/build/outputs/apk/release/app-arm64-v8a-release.apk"
-    else
+    elif [ -f "app/build/outputs/apk/release/app-universal-release.apk" ]; then
         APK="app/build/outputs/apk/release/app-universal-release.apk"
+    else
+        echo "[Targeted Build] Release APK is unsigned (no release key configured)."
+        echo "  Set TRENDING_KEYSTORE etc. or create keystore.properties (see BUILD.txt), or use: ./fast-build.sh debug"
+        exit 1
     fi
 else
     echo "[Targeted Build] Running Fast Debug assemble (skipping R8 minifier)..."

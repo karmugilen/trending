@@ -2,11 +2,22 @@
 
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
+import tempfile
 import time
-from fastapi.testclient import TestClient
-import server
+
+# Keep tests away from the real web/data bookmarks and settings.
+# Must be set before `server` is imported, because it reads the path at import time.
+_TEST_DATA_DIR = tempfile.mkdtemp(prefix="trending-test-data-")
+os.environ["TRENDING_DATA_DIR"] = _TEST_DATA_DIR
+
+import httpx  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+import server  # noqa: E402
+
+assert str(server.DATA_DIR) == _TEST_DATA_DIR, "tests must not use the real data folder"
 
 client = TestClient(server.app)
 
@@ -73,7 +84,7 @@ def test_saved_export_and_import():
     assert import_again.status_code == 200
     again_data = import_again.json()
     assert again_data["imported"] == 0, f"Expected 0 newly imported due to deduplication, got {again_data['imported']}"
-    print(f"✓ Deduplication verified: 0 duplicates inserted")
+    print("✓ Deduplication verified: 0 duplicates inserted")
 
     # 4. Import via multipart file upload
     file_story = [{
@@ -287,6 +298,72 @@ def test_settings_token_masking_and_security():
     client.post("/api/settings", json={"githubToken": ""})
     print("✓ Token sanitization and masking verified successfully")
 
+def test_cross_site_writes_are_blocked():
+    print("Testing CSRF protection on state-changing endpoints...")
+    payload = json.dumps([{"id": "evil-1", "title": "t", "url": "https://example.com"}])
+    resp = client.post(
+        "/api/saved/import",
+        files={"file": ("a.json", payload, "application/json")},
+        headers={"origin": "https://evil.example"},
+    )
+    assert resp.status_code == 403, resp.text
+    resp = client.post("/api/saved/toggle", json={"story": {"id": "x"}}, headers={"sec-fetch-site": "cross-site"})
+    assert resp.status_code == 403, resp.text
+    resp = client.delete("/api/saved/x", headers={"origin": "https://evil.example"})
+    assert resp.status_code == 403, resp.text
+    # The app's own origin is still allowed.
+    resp = client.post(
+        "/api/saved/import",
+        files={"file": ("a.json", payload, "application/json")},
+        headers={"origin": "http://127.0.0.1:8080"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert all(i["story"]["id"] != "evil-1" for i in client.delete("/api/saved/evil-1").json()["items"])
+    print("✓ Cross-site writes blocked, same-origin writes allowed")
+
+def test_discussions_rejects_non_numeric_hn_id():
+    resp = client.get("/api/discussions", params={"id": "../search?query=x", "source": "hn"})
+    assert resp.status_code == 400, resp.text
+    gh = client.get("/api/discussions", params={"id": "12345", "source": "gh"}).json()
+    assert "github.com/12345" not in gh["text"]
+
+def test_corrupt_saved_file_is_backed_up_not_wiped():
+    saved_file = server.SAVED_FILE
+    saved_file.write_text("{not valid json", encoding="utf-8")
+    assert server.load_saved() == []
+    backups = list(saved_file.parent.glob(saved_file.name + ".corrupt-*"))
+    assert backups, "corrupt file should be moved aside, not overwritten"
+    assert backups[0].read_text(encoding="utf-8") == "{not valid json"
+    for b in backups:
+        b.unlink()
+    # Writes are atomic: no temp file left behind.
+    server.save_saved([{"story": {"id": "a"}, "savedAt": 1}])
+    assert json.loads(saved_file.read_text(encoding="utf-8"))[0]["story"]["id"] == "a"
+    assert not saved_file.with_name(saved_file.name + ".tmp").exists()
+    server.save_saved([])
+
+def test_cache_prunes_old_entries():
+    now = int(time.time())
+    server.CACHE.clear()
+    server.CACHE["old"] = {"stories": [], "fetched": now - server.CACHE_MAX_AGE_SEC - 1}
+    server.CACHE["new"] = {"stories": [], "fetched": now}
+    server.prune_cache(now)
+    assert "old" not in server.CACHE and "new" in server.CACHE
+    server.CACHE.clear()
+
+def test_feed_network_error_returns_502():
+    async def boom(*args, **kwargs):
+        raise httpx.ConnectError("offline")
+    original = server.fetch_hn_stories
+    server.fetch_hn_stories = boom
+    server.CACHE.clear()
+    try:
+        resp = client.get("/api/feed?source=hn&hours=1&force_refresh=true")
+    finally:
+        server.fetch_hn_stories = original
+    assert resp.status_code == 502, resp.text
+    assert "Could not reach Hacker News" in resp.json()["detail"]
+
 if __name__ == "__main__":
     test_alert_logic_unit()
     test_settings_token_masking_and_security()
@@ -297,4 +374,9 @@ if __name__ == "__main__":
     test_discussions_endpoint()
     test_static_and_html_components()
     test_node_syntax()
+    test_cross_site_writes_are_blocked()
+    test_discussions_rejects_non_numeric_hn_id()
+    test_corrupt_saved_file_is_backed_up_not_wiped()
+    test_cache_prunes_old_entries()
+    test_feed_network_error_returns_502()
     print("\nALL BACKEND & FRONTEND INTEGRATION TESTS PASSED SUCCESSFULLY! 🚀")

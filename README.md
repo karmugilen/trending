@@ -126,6 +126,13 @@ Create a `local.properties` file in the repository root pointing to your Android
 sdk.dir=/path/to/your/Android/Sdk
 ```
 
+### Release Signing
+
+Release APKs are signed only with your own key. Provide it with env vars
+(`TRENDING_KEYSTORE`, `TRENDING_STORE_PASSWORD`, `TRENDING_KEY_ALIAS`, `TRENDING_KEY_PASSWORD`)
+or a gitignored `keystore.properties` (copy `keystore.properties.example`).
+Without a key, `assembleRelease` produces an unsigned APK. The `debug.keystore` in this repo is public and only signs debug builds.
+
 ### Fast Development Build
 
 For rapid iterative testing on a connected device:
@@ -153,11 +160,18 @@ Compiled APKs will be located in `app/build/outputs/apk/release/`.
 
 ## Desktop Viewer
 
-To run the local desktop viewer:
+To run the local desktop viewer (needs Python 3.10+):
 ```bash
-./run_web.sh
+./run_web.sh   # creates .venv and installs web/requirements.txt on first run
 ```
 Then navigate to `http://127.0.0.1:8080` in your browser.
+
+To run the web tests:
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r web/requirements-dev.txt
+cd web && ../.venv/bin/python -m pytest -q
+```
+Tests use a temporary data folder, so your saved bookmarks and settings are not touched.
 
 ---
 

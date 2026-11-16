@@ -9,6 +9,21 @@ val localProps = Properties().apply {
     rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
 }
 
+// Release signing comes from (first match wins per value):
+//   1. env vars   TRENDING_KEYSTORE, TRENDING_STORE_PASSWORD, TRENDING_KEY_ALIAS, TRENDING_KEY_PASSWORD
+//   2. -P props   trendingKeystore, trendingStorePass, trendingKeyAlias, trendingKeyPass
+//   3. keystore.properties in the repo root (gitignored): storeFile, storePassword, keyAlias, keyPassword
+// With none of them the release APK is left unsigned (F-Droid signs its own builds).
+// The debug keystore in the repo is public and is never used for release builds.
+val keystoreProps = Properties().apply {
+    rootProject.file("keystore.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
+}
+
+fun signingValue(env: String, prop: String, fileKey: String): String? =
+    System.getenv(env)?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty(prop) as String?)?.takeIf { it.isNotBlank() }
+        ?: keystoreProps.getProperty(fileKey)?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "app.omalauncher.trending"
     compileSdk = 36
@@ -17,8 +32,8 @@ android {
         applicationId = "app.omalauncher.trending"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.5.1"
+        versionCode = 9
+        versionName = "1.5.2"
     }
 
     val allAbis = project.hasProperty("allAbis")
@@ -37,25 +52,34 @@ android {
         }
     }
 
-    // The keystore shipped with the source, or production release key if configured
-    val releaseStore = System.getenv("TRENDING_KEYSTORE") ?: project.findProperty("trendingKeystore") as String?
-    val releaseStorePass = System.getenv("TRENDING_STORE_PASSWORD") ?: project.findProperty("trendingStorePass") as String?
-    val releaseKeyAlias = System.getenv("TRENDING_KEY_ALIAS") ?: project.findProperty("trendingKeyAlias") as String?
-    val releaseKeyPass = System.getenv("TRENDING_KEY_PASSWORD") ?: project.findProperty("trendingKeyPass") as String?
+    val releaseStore = signingValue("TRENDING_KEYSTORE", "trendingKeystore", "storeFile")
+    val releaseStorePass = signingValue("TRENDING_STORE_PASSWORD", "trendingStorePass", "storePassword")
+    val releaseKeyAlias = signingValue("TRENDING_KEY_ALIAS", "trendingKeyAlias", "keyAlias")
+    val releaseKeyPass = signingValue("TRENDING_KEY_PASSWORD", "trendingKeyPass", "keyPassword")
+    val releaseStoreFile = releaseStore?.let { rootProject.file(it) }
+
+    if (releaseStore != null) {
+        require(releaseStoreFile?.isFile == true) { "Release keystore not found: $releaseStore" }
+        require(releaseStorePass != null && releaseKeyAlias != null && releaseKeyPass != null) {
+            "Release keystore is set but store password, key alias or key password is missing " +
+                "(TRENDING_STORE_PASSWORD / TRENDING_KEY_ALIAS / TRENDING_KEY_PASSWORD or keystore.properties)."
+        }
+    }
 
     signingConfigs {
-        create("shipped") {
+        // Debug builds only. This key is public (it is in the repo), so it must never sign a release.
+        create("devDebug") {
             storeFile = rootProject.file("debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
-        if (releaseStore != null && file(releaseStore).exists()) {
+        if (releaseStoreFile != null) {
             create("release") {
-                storeFile = file(releaseStore)
-                storePassword = releaseStorePass ?: "android"
-                keyAlias = releaseKeyAlias ?: "trending"
-                keyPassword = releaseKeyPass ?: "android"
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePass
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPass
             }
         }
     }
@@ -68,15 +92,15 @@ android {
                 getDefaultProguardFile("proguard-android.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = if (signingConfigs.findByName("release") != null) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("shipped")
+            // Unsigned (…-release-unsigned.apk) when no release key is configured.
+            signingConfig = signingConfigs.findByName("release")
+            if (signingConfig == null) {
+                logger.warn("No release keystore configured: release APK will be unsigned.")
             }
         }
         debug {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("shipped")
+            signingConfig = signingConfigs.getByName("devDebug")
         }
     }
 

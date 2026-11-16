@@ -1,0 +1,3 @@
+• Security: release builds are no longer signed with the public debug key. Reinstall once if updating fails.
+• Fix: a malformed GitHub date could crash the app.
+• Smoother saving of bookmarks.
